@@ -36,33 +36,31 @@ else:
 # ==========================================
 # SISTEMA DE LOGIN E SEGURANÇA
 # ==========================================
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-if 'perfil' not in st.session_state:
-    st.session_state['perfil'] = ''
 
-if not st.session_state['logged_in']:
-    col1, col2, col3 = st.columns([1.5, 1, 1.5]) 
-    with col2:
-        if logo_path:
-            st.image(logo_path, use_container_width=True)
-        else:
-            st.warning("⚠️ Imagem não encontrada. Certifique-se de que o nome é 'logo' e está na mesma pasta.")
-            
-        st.markdown("<h3 style='text-align: center;'>🔐 Acesso ao Sistema</h3>", unsafe_allow_html=True)
-        usuario = st.text_input("Usuário").strip().lower()
-        senha = st.text_input("Senha", type="password")
-        btn_login = st.button("Entrar", use_container_width=True, type="primary")
+        # Aqui você pode adicionar quantos funcionários quiser para o PCP
+usuarios_pcp = {
+            "Denis.PCP": "Heitor2024",
+            "Joao.PCP": "46993061",
+        }
 
-        if btn_login:
-            if usuario == "pcp" and senha == "pcp123":
+        # Aqui você adiciona os usuários para a equipe de Vendas / Geral
+usuarios_vendas = {
+            "Vendas": "AcosVital@2026"
+        }
+
+if btn_login:
+            # Verifica se o usuário existe no PCP e se a senha bate
+            if usuario in usuarios_pcp and senha == usuarios_pcp[usuario]:
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "PCP"
                 st.rerun()
-            elif usuario == "carlos" and senha == "vendas123":
+                
+            # Verifica se o usuário existe em Vendas e se a senha bate
+            elif usuario in usuarios_vendas and senha == usuarios_vendas[usuario]:
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "VENDEDOR"
                 st.rerun()
+                
             else:
                 st.error("❌ Usuário ou senha incorretos!")
     
