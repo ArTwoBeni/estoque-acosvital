@@ -55,7 +55,6 @@ if not st.session_state['logged_in']:
         btn_login = st.button("Entrar", use_container_width=True, type="primary")
 
         # --- DICIONÁRIO DE USUÁRIOS E SENHAS ---
-        # Nomes SEMPRE em minúsculo (o sistema já converte o que o usuário digitar)
         usuarios_pcp = {
             "denis.pcp": "Heitor2024",
             "joao.pcp": "46993061"
@@ -66,18 +65,14 @@ if not st.session_state['logged_in']:
         }
 
         if btn_login:
-            # Verifica se o usuário existe no PCP e se a senha bate
             if usuario in usuarios_pcp and senha == usuarios_pcp[usuario]:
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "PCP"
                 st.rerun()
-                
-            # Verifica se o usuário existe em Vendas e se a senha bate
             elif usuario in usuarios_vendas and senha == usuarios_vendas[usuario]:
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "VENDEDOR"
                 st.rerun()
-                
             else:
                 st.error("❌ Usuário ou senha incorretos!")
     
@@ -104,7 +99,6 @@ st.markdown("---")
 
 DATABASE_URL = st.secrets["DATABASE_URL"]
 
-# Usamos cache para o aplicativo não ficar abrindo e fechando conexões com a nuvem toda hora
 @st.cache_resource
 def init_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -112,10 +106,11 @@ def init_connection():
 conn = init_connection()
 c = conn.cursor()
 
-# Criação da Tabela (Em PostgreSQL usamos SERIAL em vez de AUTOINCREMENT)
+# Criação/Atualização da Tabela com suporte à coluna de Código
 c.execute('''
     CREATE TABLE IF NOT EXISTS materiais (
         id SERIAL PRIMARY KEY,
+        codigo TEXT,
         categoria TEXT,
         tipo TEXT,
         nome TEXT,
@@ -125,6 +120,13 @@ c.execute('''
     )
 ''')
 conn.commit()
+
+# Força a criação da coluna caso o banco já tenha sido iniciado sem ela anteriormente
+try:
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
+    conn.commit()
+except:
+    pass
 
 # --- LÓGICA DE EXIBIÇÃO POR PERFIL ---
 
@@ -144,11 +146,19 @@ if st.session_state['perfil'] == "PCP":
             "CONSTRUÇÃO CIVIL": ["Vergalhões CA - 25", "Vergalhões CA - 50", "Vergalhões CA - 60", "Arame Recozido", "Barra de Transferência", "Tela Soldada Nervurada", "Telha", "Treliça"]
         }
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3_cod = st.columns([1.5, 1.5, 1])
         with col1:
             categoria = st.selectbox("Categoria", list(categorias_catalogo.keys()), key="cad_cat_principal")
         with col2:
             tipo = st.selectbox("Tipo", categorias_catalogo[categoria], key="cad_tipo_principal")
+        with col3_cod:
+            codigo = st.text_input("Código do Material (Opcional)", key="cad_codigo")
+            if codigo:
+                codigo_limpo = codigo.strip().upper()
+                c.execute("SELECT nome, dimensoes FROM materiais WHERE UPPER(codigo) = %s", (codigo_limpo,))
+                registro_existente = c.fetchone()
+                if registro_existente:
+                    st.warning(f"⚠️ Código já cadastrado em: {registro_existente[0]} ({registro_existente[1]})")
                     
         nome = ""
         dimensoes_para_salvar = ""
@@ -254,62 +264,62 @@ if st.session_state['perfil'] == "PCP":
                 if schedule: dimensoes_para_salvar += f" | SCH: {schedule.upper()}"
                 if not dim_nom or not dim_red or not comp: campos_vazios = True
 
-            elif tipo == "Pestana (ASME B16.9 ou Inox MSS SP-43)":
-                col3, col4 = st.columns(2)
-                with col3:
-                    modelo = st.selectbox("Modelo", ["ANSI Curto", "ANSI Longo", "MSS Tipo A", "MSS Tipo B"], key="cad_mod_pest")
-                    dim_garg = st.text_input("Diâm. Garganta (mm)", key="cad_dim2_pest")
-                with col4:
-                    dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_pest")    
-                    comp = st.text_input("Comprimento (mm)", key="cad_comp_pest")
-                    
-                nome = f"Pestana {modelo}"
-                dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}" | Garg: {dim_garg}mm | Comp: {comp}mm'
-                if not dim_nom or not dim_garg or not comp: campos_vazios = True
+        elif tipo == "Pestana (ASME B16.9 ou Inox MSS SP-43)":
+            col3, col4 = st.columns(2)
+            with col3:
+                modelo = st.selectbox("Modelo", ["ANSI Curto", "ANSI Longo", "MSS Tipo A", "MSS Tipo B"], key="cad_mod_pest")
+                dim_garg = st.text_input("Diâm. Garganta (mm)", key="cad_dim2_pest")
+            with col4:
+                dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_pest")    
+                comp = st.text_input("Comprimento (mm)", key="cad_comp_pest")
+                
+            nome = f"Pestana {modelo}"
+            dim1 = dim_nom.replace('"', '').strip()
+            dimensoes_para_salvar = f'{dim1}" | Garg: {dim_garg}mm | Comp: {comp}mm'
+            if not dim_nom or not dim_garg or not comp: campos_vazios = True
 
-            elif tipo == "Alta Pressão / Forjadas":
-                col3, col4, col5 = st.columns(3)
-                with col3:
-                    modelo = st.selectbox("Modelo", ["Cotovelo 45°", "Cotovelo 90°", "Te", "Cruzeta", "Luva", "Meia Luva", "CAP Roscado"], key="cad_mod_alta")
-                with col4:
-                    classe = st.selectbox("Classe", ["Nenhum", "3000#", "6000#", "9000#"], key="cad_cla_alta")
-                with col5:
-                    dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_alta")
-                    
-                dim_tubo = st.text_input("Diâm. Tubo (Pol) - Opcional", key="cad_dim2_alta")
-                    
-                nome = f"{modelo} {classe}"
-                dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}"'
-                if dim_tubo: 
-                    dim2 = dim_tubo.replace('"', '').strip()
-                    dimensoes_para_salvar += f' x {dim2}"'
-                if not dim_nom: campos_vazios = True
+        elif tipo == "Alta Pressão / Forjadas":
+            col3, col4, col5 = st.columns(3)
+            with col3:
+                modelo = st.selectbox("Modelo", ["Cotovelo 45°", "Cotovelo 90°", "Te", "Cruzeta", "Luva", "Meia Luva", "CAP Roscado"], key="cad_mod_alta")
+            with col4:
+                classe = st.selectbox("Classe", ["Nenhum", "3000#", "6000#", "9000#"], key="cad_cla_alta")
+            with col5:
+                dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_alta")
+                
+            dim_tubo = st.text_input("Diâm. Tubo (Pol) - Opcional", key="cad_dim2_alta")
+                
+            nome = f"{modelo} {classe}"
+            dim1 = dim_nom.replace('"', '').strip()
+            dimensoes_para_salvar = f'{dim1}"'
+            if dim_tubo: 
+                dim2 = dim_tubo.replace('"', '').strip()
+                dimensoes_para_salvar += f' x {dim2}"'
+            if not dim_nom: campos_vazios = True
 
-            elif tipo == "Colares":
-                col3, col4 = st.columns(2)
-                with col3:
-                    modelo = st.selectbox("Modelo", ["Colar BW", "Colar BW Weldolet", "Colar TH Roscado", "Sockolet Colar SW"], key="cad_mod_colar")
-                with col4:
-                    classe = st.selectbox("Classe", ["3000#", "6000#", "9000#"], key="cad_cla_colar")
-                    
-                dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_colar")
-                nome = f"{modelo} {classe}"
-                dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}"'
-                if not dim_nom: campos_vazios = True
+        elif tipo == "Colares":
+            col3, col4 = st.columns(2)
+            with col3:
+                modelo = st.selectbox("Modelo", ["Colar BW", "Colar BW Weldolet", "Colar TH Roscado", "Sockolet Colar SW"], key="cad_mod_colar")
+            with col4:
+                classe = st.selectbox("Classe", ["3000#", "6000#", "9000#"], key="cad_cla_colar")
+                
+            dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_colar")
+            nome = f"{modelo} {classe}"
+            dim1 = dim_nom.replace('"', '').strip()
+            dimensoes_para_salvar = f'{dim1}"'
+            if not dim_nom: campos_vazios = True
 
-            elif tipo == "Plugs / Buchas / Niples":
-                col3, col4 = st.columns(2)
-                with col3:
-                    nome = st.selectbox("Modelo", ["Bucha de Redução", "Bucha de Redução Sextavada", "Niple Duplo", "Plug Cabeça Quadrada", "Plug Cabeça Sextavada", "Plug Cabeça Redonda"], key="cad_mod_plug")
-                with col4:
-                    dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_plug")
-                    
-                dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}"'
-                if not dim_nom: campos_vazios = True
+        elif tipo == "Plugs / Buchas / Niples":
+            col3, col4 = st.columns(2)
+            with col3:
+                nome = st.selectbox("Modelo", ["Bucha de Redução", "Bucha de Redução Sextavada", "Niple Duplo", "Plug Cabeça Quadrada", "Plug Cabeça Sextavada", "Plug Cabeça Redonda"], key="cad_mod_plug")
+            with col4:
+                dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_plug")
+                
+            dim1 = dim_nom.replace('"', '').strip()
+            dimensoes_para_salvar = f'{dim1}"'
+            if not dim_nom: campos_vazios = True
 
         elif categoria == "TUBOS":
             modelos_tubos = {
@@ -756,11 +766,11 @@ if st.session_state['perfil'] == "PCP":
         if submit_button:
             nome_limpo = nome.strip().upper()
             dimensoes_limpas = dimensoes_para_salvar.strip().upper()
+            cod_final = codigo.strip().upper() if codigo else "-"
             
             if campos_vazios:
                 st.warning("⚠️ Por favor, preencha todos os campos obrigatórios da peça!")
             else:
-                # Modificado o '?' para '%s' para funcionar com PostgreSQL
                 c.execute('''
                     SELECT id FROM materiais 
                     WHERE categoria = %s AND tipo = %s AND nome = %s AND dimensoes = %s
@@ -769,11 +779,10 @@ if st.session_state['perfil'] == "PCP":
                 if c.fetchone():
                     st.error(f"❌ Cadastro Bloqueado: O material '{nome_limpo}' com essas dimensões já existe no catálogo!")
                 else:
-                    # Modificado o '?' para '%s' para funcionar com PostgreSQL
                     c.execute('''
-                        INSERT INTO materiais (categoria, tipo, nome, dimensoes, unidade, saldo)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    ''', (categoria, tipo, nome_limpo, dimensoes_limpas, "-", quantidade))
+                        INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, "-", quantidade))
                     conn.commit()
                     st.success(f"✅ Material '{nome_limpo}' cadastrado com sucesso!")
                     st.rerun()
@@ -781,8 +790,8 @@ if st.session_state['perfil'] == "PCP":
     with aba_movimentacao:
         st.subheader("🔄 Movimentação de Estoque")
 
-        c.execute("SELECT id, categoria, tipo, nome, dimensoes, saldo FROM materiais")
-        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "categoria", "tipo", "nome", "dimensoes", "saldo"])
+        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais")
+        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "codigo", "categoria", "tipo", "nome", "dimensoes", "saldo"])
 
         if df_materiais.empty:
             st.info("💡 Cadastre pelo menos um material no formulário acima para poder realizar movimentações.")
@@ -849,8 +858,9 @@ if st.session_state['perfil'] == "PCP":
             st.markdown("**2. Detalhes e Operação**")
             
             if not df_final.empty:
+                # Inclui o código no identificador para facilitar a busca do PCP
                 df_final['identificador'] = df_final.apply(
-                    lambda r: f"{r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}", axis=1
+                    lambda r: f"[{r['codigo']}] {r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}" if r['codigo'] != "-" else f"{r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}", axis=1
                 )
                 
                 col_op1, col_op2, col_op3 = st.columns([2, 1, 1])
@@ -879,7 +889,6 @@ if st.session_state['perfil'] == "PCP":
                     if novo_saldo < 0:
                         st.error(f"❌ Erro: Saldo insuficiente. O estoque atual é de apenas {int(saldo_atual)}.")
                     else:
-                        # Modificado o '?' para '%s' para funcionar com PostgreSQL
                         c.execute("UPDATE materiais SET saldo = %s WHERE id = %s", (novo_saldo, id_real))
                         conn.commit()
                         st.success(msg)
@@ -889,20 +898,21 @@ if st.session_state['perfil'] == "PCP":
 
     with aba_inventario:
         st.subheader("📋 Inventário Atualizado")
-        c.execute("SELECT id, categoria, tipo, nome, dimensoes, saldo FROM materiais")
-        df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "categoria", "tipo", "nome", "dimensoes", "saldo"])
+        # Exibe o Código do material diretamente como primeira coluna em vez do ID sequencial
+        c.execute("SELECT codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais")
+        df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo"])
         if df_estoque.empty:
             st.info("O estoque está vazio.")
         else:
             st.dataframe(df_estoque, use_container_width=True, hide_index=True)
 
 # ==========================================
-# SE FOR VENDEDOR: Exibe APENAS a tabela de Inventário
+# SE FOR VENDEDOR: Exibe APENAS o Inventário com a nova coluna de Código
 # ==========================================
 elif st.session_state['perfil'] == "VENDEDOR":
     st.subheader("📋 Inventário Atualizado em Tempo Real")
-    c.execute("SELECT id, categoria, tipo, nome, dimensoes, saldo FROM materiais")
-    df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "categoria", "tipo", "nome", "dimensoes", "saldo"])
+    c.execute("SELECT codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais")
+    df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo"])
     
     if df_estoque.empty:
         st.info("O estoque está vazio no momento.")
