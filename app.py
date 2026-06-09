@@ -57,12 +57,12 @@ if not st.session_state['logged_in']:
         # --- DICIONÁRIO DE USUÁRIOS E SENHAS ---
         # Nomes SEMPRE em minúsculo (o sistema já converte o que o usuário digitar)
         usuarios_pcp = {
-            "Denis.PCP": "Heitor2024",
-            "Joao.PCP": "46993061"
+            "denis.pcp": "Heitor2024",
+            "joao.pcp": "46993061"
         }
 
         usuarios_vendas = {
-            "Vendas": "AcosVital@2026"
+            "vendas": "AcosVital@2026"
         }
 
         if btn_login:
