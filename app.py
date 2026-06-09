@@ -14,6 +14,9 @@ esconder_elementos = """
     
     /* Esconde o botão de Deploy na barra superior */
     .stAppDeployButton {display: none !important;}
+    
+    /* Esconde apenas os links (ícone do GitHub) dentro da barra superior, mantendo os 3 pontinhos */
+    [data-testid="stToolbar"] a {display: none !important;}
     </style>
     """
 st.markdown(esconder_elementos, unsafe_allow_html=True)
