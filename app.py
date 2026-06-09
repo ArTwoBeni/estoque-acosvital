@@ -36,16 +36,14 @@ else:
 # ==========================================
 # SISTEMA DE LOGIN E SEGURANÇA
 # ==========================================
-# --- DICIONÁRIO DE USUÁRIOS E SENHAS ---
-        # Aqui você pode adicionar quantos funcionários quiser para o PCP
+        # Nomes sempre em minúsculo (o sistema já converte o que o usuário digitar)
         usuarios_pcp = {
-            "Denis.PCP": "pcp123",
-            "Joao.PCP": "vitalpcp2026"
+            "denis.pcp": "pcp123",
+            "joao.pcp": "vitalpcp2026"
         }
 
-        # Aqui você adiciona os usuários para a equipe de Vendas / Geral
         usuarios_vendas = {
-            "Vendas": "AcosVital@2026"
+            "vendas": "AcosVital@2026"
         }
 
         if btn_login:
