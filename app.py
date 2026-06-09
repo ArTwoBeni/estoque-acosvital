@@ -121,7 +121,6 @@ c.execute('''
 ''')
 conn.commit()
 
-# Força a criação da coluna caso o banco já tenha sido iniciado sem ela anteriormente
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     conn.commit()
@@ -264,62 +263,62 @@ if st.session_state['perfil'] == "PCP":
                 if schedule: dimensoes_para_salvar += f" | SCH: {schedule.upper()}"
                 if not dim_nom or not dim_red or not comp: campos_vazios = True
 
-        elif tipo == "Pestana (ASME B16.9 ou Inox MSS SP-43)":
-            col3, col4 = st.columns(2)
-            with col3:
-                modelo = st.selectbox("Modelo", ["ANSI Curto", "ANSI Longo", "MSS Tipo A", "MSS Tipo B"], key="cad_mod_pest")
-                dim_garg = st.text_input("Diâm. Garganta (mm)", key="cad_dim2_pest")
-            with col4:
-                dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_pest")    
-                comp = st.text_input("Comprimento (mm)", key="cad_comp_pest")
-                
-            nome = f"Pestana {modelo}"
-            dim1 = dim_nom.replace('"', '').strip()
-            dimensoes_para_salvar = f'{dim1}" | Garg: {dim_garg}mm | Comp: {comp}mm'
-            if not dim_nom or not dim_garg or not comp: campos_vazios = True
+            elif tipo == "Pestana (ASME B16.9 ou Inox MSS SP-43)":
+                col3, col4 = st.columns(2)
+                with col3:
+                    modelo = st.selectbox("Modelo", ["ANSI Curto", "ANSI Longo", "MSS Tipo A", "MSS Tipo B"], key="cad_mod_pest")
+                    dim_garg = st.text_input("Diâm. Garganta (mm)", key="cad_dim2_pest")
+                with col4:
+                    dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_pest")    
+                    comp = st.text_input("Comprimento (mm)", key="cad_comp_pest")
+                    
+                nome = f"Pestana {modelo}"
+                dim1 = dim_nom.replace('"', '').strip()
+                dimensoes_para_salvar = f'{dim1}" | Garg: {dim_garg}mm | Comp: {comp}mm'
+                if not dim_nom or not dim_garg or not comp: campos_vazios = True
 
-        elif tipo == "Alta Pressão / Forjadas":
-            col3, col4, col5 = st.columns(3)
-            with col3:
-                modelo = st.selectbox("Modelo", ["Cotovelo 45°", "Cotovelo 90°", "Te", "Cruzeta", "Luva", "Meia Luva", "CAP Roscado"], key="cad_mod_alta")
-            with col4:
-                classe = st.selectbox("Classe", ["Nenhum", "3000#", "6000#", "9000#"], key="cad_cla_alta")
-            with col5:
-                dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_alta")
-                
-            dim_tubo = st.text_input("Diâm. Tubo (Pol) - Opcional", key="cad_dim2_alta")
-                
-            nome = f"{modelo} {classe}"
-            dim1 = dim_nom.replace('"', '').strip()
-            dimensoes_para_salvar = f'{dim1}"'
-            if dim_tubo: 
-                dim2 = dim_tubo.replace('"', '').strip()
-                dimensoes_para_salvar += f' x {dim2}"'
-            if not dim_nom: campos_vazios = True
+            elif tipo == "Alta Pressão / Forjadas":
+                col3, col4, col5 = st.columns(3)
+                with col3:
+                    modelo = st.selectbox("Modelo", ["Cotovelo 45°", "Cotovelo 90°", "Te", "Cruzeta", "Luva", "Meia Luva", "CAP Roscado"], key="cad_mod_alta")
+                with col4:
+                    classe = st.selectbox("Classe", ["Nenhum", "3000#", "6000#", "9000#"], key="cad_cla_alta")
+                with col5:
+                    dim_nom = st.text_input("Diâm. Nom. (Pol)", key="cad_dim1_alta")
+                    
+                dim_tubo = st.text_input("Diâm. Tubo (Pol) - Opcional", key="cad_dim2_alta")
+                    
+                nome = f"{modelo} {classe}"
+                dim1 = dim_nom.replace('"', '').strip()
+                dimensoes_para_salvar = f'{dim1}"'
+                if dim_tubo: 
+                    dim2 = dim_tubo.replace('"', '').strip()
+                    dimensoes_para_salvar += f' x {dim2}"'
+                if not dim_nom: campos_vazios = True
 
-        elif tipo == "Colares":
-            col3, col4 = st.columns(2)
-            with col3:
-                modelo = st.selectbox("Modelo", ["Colar BW", "Colar BW Weldolet", "Colar TH Roscado", "Sockolet Colar SW"], key="cad_mod_colar")
-            with col4:
-                classe = st.selectbox("Classe", ["3000#", "6000#", "9000#"], key="cad_cla_colar")
-                
-            dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_colar")
-            nome = f"{modelo} {classe}"
-            dim1 = dim_nom.replace('"', '').strip()
-            dimensoes_para_salvar = f'{dim1}"'
-            if not dim_nom: campos_vazios = True
+            elif tipo == "Colares":
+                col3, col4 = st.columns(2)
+                with col3:
+                    modelo = st.selectbox("Modelo", ["Colar BW", "Colar BW Weldolet", "Colar TH Roscado", "Sockolet Colar SW"], key="cad_mod_colar")
+                with col4:
+                    classe = st.selectbox("Classe", ["3000#", "6000#", "9000#"], key="cad_cla_colar")
+                    
+                dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_colar")
+                nome = f"{modelo} {classe}"
+                dim1 = dim_nom.replace('"', '').strip()
+                dimensoes_para_salvar = f'{dim1}"'
+                if not dim_nom: campos_vazios = True
 
-        elif tipo == "Plugs / Buchas / Niples":
-            col3, col4 = st.columns(2)
-            with col3:
-                nome = st.selectbox("Modelo", ["Bucha de Redução", "Bucha de Redução Sextavada", "Niple Duplo", "Plug Cabeça Quadrada", "Plug Cabeça Sextavada", "Plug Cabeça Redonda"], key="cad_mod_plug")
-            with col4:
-                dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_plug")
-                
-            dim1 = dim_nom.replace('"', '').strip()
-            dimensoes_para_salvar = f'{dim1}"'
-            if not dim_nom: campos_vazios = True
+            elif tipo == "Plugs / Buchas / Niples":
+                col3, col4 = st.columns(2)
+                with col3:
+                    nome = st.selectbox("Modelo", ["Bucha de Redução", "Bucha de Redução Sextavada", "Niple Duplo", "Plug Cabeça Quadrada", "Plug Cabeça Sextavada", "Plug Cabeça Redonda"], key="cad_mod_plug")
+                with col4:
+                    dim_nom = st.text_input("Diâmetro Nominal (Pol)", key="cad_dim_plug")
+                    
+                dim1 = dim_nom.replace('"', '').strip()
+                dimensoes_para_salvar = f'{dim1}"'
+                if not dim_nom: campos_vazios = True
 
         elif categoria == "TUBOS":
             modelos_tubos = {
@@ -796,76 +795,95 @@ if st.session_state['perfil'] == "PCP":
         if df_materiais.empty:
             st.info("💡 Cadastre pelo menos um material no formulário acima para poder realizar movimentações.")
         else:
+            # Prepara o identificador incluindo o Código
+            df_materiais['identificador'] = df_materiais.apply(
+                lambda r: f"[{r['codigo']}] {r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}" if r['codigo'] != "-" else f"{r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}", axis=1
+            )
+
             st.markdown("**1. Localize o Material**")
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                categorias_existentes = df_materiais['categoria'].unique()
-                filtro_cat = st.selectbox("Categoria:", categorias_existentes, key="mov_cat")
-                
-            with col_m2:
-                df_filtrado_cat = df_materiais[df_materiais['categoria'] == filtro_cat]
-                tipos_existentes = df_filtrado_cat['tipo'].unique()
-                filtro_tipo = st.selectbox("Tipo:", tipos_existentes, key="mov_tipo")
+            modo_busca = st.radio(
+                "Escolha como quer localizar a peça:", 
+                ["🔍 Busca Rápida (Digitar Código ou Nome)", "🗂️ Procurar por Categoria (Catálogo)"], 
+                horizontal=True
+            )
 
-            df_final = df_filtrado_cat[df_filtrado_cat['tipo'] == filtro_tipo].copy()
+            df_final = pd.DataFrame()
+            item_selecionado = None
 
-            if filtro_cat == "FLANGES":
-                if filtro_tipo == "ANSI" and not df_final.empty:
-                    col_m3, col_m4 = st.columns(2)
-                    with col_m3:
-                        classes_possiveis = ["150 LBS", "300 LBS", "400 LBS", "600 LBS", "900 LBS", "1500 LBS"]
-                        classes_existentes = [c for c in classes_possiveis if df_final['nome'].str.contains(c, case=False, regex=False).any()]
-                        filtro_classe = st.selectbox("Classe:", classes_existentes if classes_existentes else ["Nenhuma"], key="mov_classe_ansi")
+            if modo_busca == "🔍 Busca Rápida (Digitar Código ou Nome)":
+                st.info("💡 Dica: Clique na caixa abaixo e comece a digitar o Código ou o Nome. A lista vai filtrar automaticamente!")
+                item_selecionado = st.selectbox("Digite ou selecione a peça:", df_materiais['identificador'].tolist(), key="mov_item_rapido")
+                df_final = df_materiais # O banco inteiro fica disponível para a operação
+
+            else:
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    categorias_existentes = df_materiais['categoria'].unique()
+                    filtro_cat = st.selectbox("Categoria:", categorias_existentes, key="mov_cat")
+                    
+                with col_m2:
+                    df_filtrado_cat = df_materiais[df_materiais['categoria'] == filtro_cat]
+                    tipos_existentes = df_filtrado_cat['tipo'].unique()
+                    filtro_tipo = st.selectbox("Tipo:", tipos_existentes, key="mov_tipo")
+
+                df_filtrado_tipo = df_filtrado_cat[df_filtrado_cat['tipo'] == filtro_tipo].copy()
+
+                if filtro_cat == "FLANGES":
+                    if filtro_tipo == "ANSI" and not df_filtrado_tipo.empty:
+                        col_m3, col_m4 = st.columns(2)
+                        with col_m3:
+                            classes_possiveis = ["150 LBS", "300 LBS", "400 LBS", "600 LBS", "900 LBS", "1500 LBS"]
+                            classes_existentes = [c for c in classes_possiveis if df_filtrado_tipo['nome'].str.contains(c, case=False, regex=False).any()]
+                            filtro_classe = st.selectbox("Classe:", classes_existentes if classes_existentes else ["Nenhuma"], key="mov_classe_ansi")
+                            if filtro_classe != "Nenhuma":
+                                df_filtrado_tipo = df_filtrado_tipo[df_filtrado_tipo['nome'].str.contains(filtro_classe, case=False, regex=False)]
+                                
+                        with col_m4:
+                            modelos_possiveis = ["WN (Weld-Neck)", "SW (Socket-Weld)", "CEGO", "SOB PLANO", "SO (Slip-on)", "SOLTO"]
+                            modelos_existentes = [m for m in modelos_possiveis if df_filtrado_tipo['nome'].str.contains(m, case=False, regex=False).any()]
+                            filtro_modelo = st.selectbox("Modelo:", modelos_existentes if modelos_existentes else ["Nenhum"], key="mov_modelo_ansi")
+                            if filtro_modelo != "Nenhum":
+                                df_filtrado_tipo = df_filtrado_tipo[df_filtrado_tipo['nome'].str.contains(filtro_modelo, case=False, regex=False)]
+
+                    elif filtro_tipo == "AWWA C-207" and not df_filtrado_tipo.empty:
+                        classes_possiveis = ["CLASSE B  (86 PSI)", "CLASSE D (175 : 150 PSI)", "CLASSE E  (275 PSI)", "CLASSE F  (300 PSI)"]
+                        classes_existentes = [c for c in classes_possiveis if df_filtrado_tipo['nome'].str.upper().str.contains(c, case=False, regex=False).any()]
+                        filtro_classe = st.selectbox("Classe:", classes_existentes if classes_existentes else ["Nenhuma"], key="mov_classe_awwa")
                         if filtro_classe != "Nenhuma":
-                            df_final = df_final[df_final['nome'].str.contains(filtro_classe, case=False, regex=False)]
-                            
-                    with col_m4:
-                        modelos_possiveis = ["WN (Weld-Neck)", "SW (Socket-Weld)", "CEGO", "SOB PLANO", "SO (Slip-on)", "SOLTO"]
-                        modelos_existentes = [m for m in modelos_possiveis if df_final['nome'].str.contains(m, case=False, regex=False).any()]
-                        filtro_modelo = st.selectbox("Modelo:", modelos_existentes if modelos_existentes else ["Nenhum"], key="mov_modelo_ansi")
-                        if filtro_modelo != "Nenhum":
-                            df_final = df_final[df_final['nome'].str.contains(filtro_modelo, case=False, regex=False)]
+                            df_filtrado_tipo = df_filtrado_tipo[df_filtrado_tipo['nome'].str.upper().str.contains(filtro_classe, case=False, regex=False)]
 
-                elif filtro_tipo == "AWWA C-207" and not df_final.empty:
-                    classes_possiveis = ["CLASSE B  (86 PSI)", "CLASSE D (175 : 150 PSI)", "CLASSE E  (275 PSI)", "CLASSE F  (300 PSI)"]
-                    classes_existentes = [c for c in classes_possiveis if df_final['nome'].str.upper().str.contains(c, case=False, regex=False).any()]
-                    filtro_classe = st.selectbox("Classe:", classes_existentes if classes_existentes else ["Nenhuma"], key="mov_classe_awwa")
-                    if filtro_classe != "Nenhuma":
-                        df_final = df_final[df_final['nome'].str.upper().str.contains(filtro_classe, case=False, regex=False)]
+                    elif filtro_tipo == "PN" and not df_filtrado_tipo.empty:
+                        col_m3, col_m4 = st.columns(2)
+                        with col_m3:
+                            pn_possiveis = ["PN 10", "PN 16", "PN 25", "PN 40", "PN 63", "PN 100"]
+                            pn_existentes = [p for p in pn_possiveis if df_filtrado_tipo['nome'].str.contains(p, case=False, regex=False).any()]
+                            filtro_pn = st.selectbox("Pressão (PN):", pn_existentes if pn_existentes else ["Nenhuma"], key="mov_pn_val")
+                            if filtro_pn != "Nenhuma":
+                                df_filtrado_tipo = df_filtrado_tipo[df_filtrado_tipo['nome'].str.contains(filtro_pn, case=False, regex=False)]
+                                
+                        with col_m4:
+                            classes_pn_possiveis = ["Tipo 1", "Tipo 2", "Tipo 5", "Tipo 11", "Tipo 12"]
+                            classes_pn_existentes = [c for c in classes_pn_possiveis if df_filtrado_tipo['nome'].str.contains(c, case=False, regex=False).any()]
+                            filtro_classe_pn = st.selectbox("Classe:", classes_pn_existentes if classes_pn_existentes else ["Nenhuma"], key="mov_classe_pn")
+                            if filtro_classe_pn != "Nenhuma":
+                                df_filtrado_tipo = df_filtrado_tipo[df_filtrado_tipo['nome'].str.contains(filtro_classe_pn, case=False, regex=False)]
 
-                elif filtro_tipo == "PN" and not df_final.empty:
-                    col_m3, col_m4 = st.columns(2)
-                    with col_m3:
-                        pn_possiveis = ["PN 10", "PN 16", "PN 25", "PN 40", "PN 63", "PN 100"]
-                        pn_existentes = [p for p in pn_possiveis if df_final['nome'].str.contains(p, case=False, regex=False).any()]
-                        filtro_pn = st.selectbox("Pressão (PN):", pn_existentes if pn_existentes else ["Nenhuma"], key="mov_pn_val")
-                        if filtro_pn != "Nenhuma":
-                            df_final = df_final[df_final['nome'].str.contains(filtro_pn, case=False, regex=False)]
-                            
-                    with col_m4:
-                        classes_pn_possiveis = ["Tipo 1", "Tipo 2", "Tipo 5", "Tipo 11", "Tipo 12"]
-                        classes_pn_existentes = [c for c in classes_pn_possiveis if df_final['nome'].str.contains(c, case=False, regex=False).any()]
-                        filtro_classe_pn = st.selectbox("Classe:", classes_pn_existentes if classes_pn_existentes else ["Nenhuma"], key="mov_classe_pn")
-                        if filtro_classe_pn != "Nenhuma":
-                            df_final = df_final[df_final['nome'].str.contains(filtro_classe_pn, case=False, regex=False)]
+                elif filtro_cat != "FLANGES" and not df_filtrado_tipo.empty:
+                    nomes_existentes = df_filtrado_tipo['nome'].unique().tolist()
+                    filtro_modelo_dinamico = st.selectbox("Modelo / Especificação:", ["Todos"] + nomes_existentes, key="mov_mod_dinamico")
+                    if filtro_modelo_dinamico != "Todos":
+                        df_filtrado_tipo = df_filtrado_tipo[df_filtrado_tipo['nome'] == filtro_modelo_dinamico]
 
-            elif filtro_cat != "FLANGES" and not df_final.empty:
-                nomes_existentes = df_final['nome'].unique().tolist()
-                filtro_modelo_dinamico = st.selectbox("Modelo / Especificação:", ["Todos"] + nomes_existentes, key="mov_mod_dinamico")
-                if filtro_modelo_dinamico != "Todos":
-                    df_final = df_final[df_final['nome'] == filtro_modelo_dinamico]
-
-            st.markdown("**2. Detalhes e Operação**")
-            
-            if not df_final.empty:
-                # Inclui o código no identificador para facilitar a busca do PCP
-                df_final['identificador'] = df_final.apply(
-                    lambda r: f"[{r['codigo']}] {r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}" if r['codigo'] != "-" else f"{r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}", axis=1
-                )
+                df_final = df_filtrado_tipo.copy()
                 
-                col_op1, col_op2, col_op3 = st.columns([2, 1, 1])
-                with col_op1:
-                    item_selecionado = st.selectbox("Peça Exata:", df_final['identificador'].tolist(), key="mov_item")
+                if not df_final.empty:
+                    item_selecionado = st.selectbox("Peça Exata:", df_final['identificador'].tolist(), key="mov_item_filtro")
+
+            # --- PARTE DA OPERAÇÃO DE ENTRADA/SAÍDA ---
+            if item_selecionado and not df_final.empty:
+                st.markdown("**2. Detalhes e Operação**")
+                
+                col_op2, col_op3 = st.columns(2)
                 with col_op2:
                     operacao = st.radio("Operação:", ["Entrada (Soma)", "Saída (Subtrai)"], key="mov_op")
                 with col_op3:
@@ -893,12 +911,11 @@ if st.session_state['perfil'] == "PCP":
                         conn.commit()
                         st.success(msg)
                         st.rerun()
-            else:
-                st.warning("⚠️ Nenhum material encontrado no estoque com esses filtros.")
+            elif df_final.empty:
+                st.warning("⚠️ Nenhum material encontrado com esses filtros.")
 
     with aba_inventario:
         st.subheader("📋 Inventário Atualizado")
-        # Exibe o Código do material diretamente como primeira coluna em vez do ID sequencial
         c.execute("SELECT codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais")
         df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo"])
         if df_estoque.empty:
@@ -907,7 +924,7 @@ if st.session_state['perfil'] == "PCP":
             st.dataframe(df_estoque, use_container_width=True, hide_index=True)
 
 # ==========================================
-# SE FOR VENDEDOR: Exibe APENAS o Inventário com a nova coluna de Código
+# SE FOR VENDEDOR: Exibe APENAS a tabela de Inventário
 # ==========================================
 elif st.session_state['perfil'] == "VENDEDOR":
     st.subheader("📋 Inventário Atualizado em Tempo Real")
