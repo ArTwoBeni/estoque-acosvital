@@ -36,19 +36,19 @@ else:
 # ==========================================
 # SISTEMA DE LOGIN E SEGURANÇA
 # ==========================================
-
+# --- DICIONÁRIO DE USUÁRIOS E SENHAS ---
         # Aqui você pode adicionar quantos funcionários quiser para o PCP
-usuarios_pcp = {
-            "Denis.PCP": "Heitor2024",
-            "Joao.PCP": "46993061",
+        usuarios_pcp = {
+            "Denis.PCP": "pcp123",
+            "Joao.PCP": "vitalpcp2026"
         }
 
         # Aqui você adiciona os usuários para a equipe de Vendas / Geral
-usuarios_vendas = {
+        usuarios_vendas = {
             "Vendas": "AcosVital@2026"
         }
 
-if btn_login:
+        if btn_login:
             # Verifica se o usuário existe no PCP e se a senha bate
             if usuario in usuarios_pcp and senha == usuarios_pcp[usuario]:
                 st.session_state['logged_in'] = True
@@ -63,8 +63,6 @@ if btn_login:
                 
             else:
                 st.error("❌ Usuário ou senha incorretos!")
-    
-    st.stop()
 
 # ==========================================
 # BARRA LATERAL (MENU E LOGOUT)
