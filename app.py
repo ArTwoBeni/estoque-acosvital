@@ -52,7 +52,7 @@ if not st.session_state['logged_in']:
         btn_login = st.button("Entrar", use_container_width=True, type="primary")
 
         if btn_login:
-            if usuario == "Joao.PCP" and senha == "46993061":
+            if usuario == "pcp" and senha == "pcp123":
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "PCP"
                 st.rerun()
