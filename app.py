@@ -6,6 +6,18 @@ import os
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Controle de Estoque - Aços Vital", layout="wide")
 
+# --- OCULTAR MENU STREAMLIT E RODAPÉ ---
+esconder_menu = """
+    <style>
+    /* Esconde os botões do canto superior direito (GitHub, Menu, etc) */
+    [data-testid="stToolbar"] {visibility: hidden !important;}
+    
+    /* Esconde a marca d'água do Streamlit no rodapé */
+    footer {visibility: hidden !important;}
+    </style>
+    """
+st.markdown(esconder_menu, unsafe_allow_html=True)
+
 # --- GPS DA IMAGEM ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 caminho_png = os.path.join(BASE_DIR, "logo.png")
@@ -40,7 +52,7 @@ if not st.session_state['logged_in']:
         btn_login = st.button("Entrar", use_container_width=True, type="primary")
 
         if btn_login:
-            if usuario == "pcp" and senha == "pcp123":
+            if usuario == "Joao.PCP" and senha == "46993061":
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "PCP"
                 st.rerun()
