@@ -38,29 +38,29 @@ else:
 # ==========================================
 # Nomes sempre em minúsculo (o sistema já converte o que o usuário digitar)
 usuarios_pcp = {
-    "denis.pcp": "pcp123",
-    "joao.pcp": "vitalpcp2026"
-}
+    "Denis.PCP": "Heitor2024",
+    "Joao.PCP": "46993061"
+    }
 
 usuarios_vendas = {
     "vendas": "AcosVital@2026"
-}
+    }
 
     if btn_login:
-    # Verifica se o usuário existe no PCP e se a senha bate
+# Verifica se o usuário existe no PCP e se a senha bate
     if usuario in usuarios_pcp and senha == usuarios_pcp[usuario]:
         st.session_state['logged_in'] = True
         st.session_state['perfil'] = "PCP"
         st.rerun()
         
-    # Verifica se o usuário existe em Vendas e se a senha bate
+# Verifica se o usuário existe em Vendas e se a senha bate
     elif usuario in usuarios_vendas and senha == usuarios_vendas[usuario]:
         st.session_state['logged_in'] = True
         st.session_state['perfil'] = "VENDEDOR"
         st.rerun()
         
-    else:
-        st.error("❌ Usuário ou senha incorretos!")
+        else:
+            st.error("❌ Usuário ou senha incorretos!")
 
 # ==========================================
 # BARRA LATERAL (MENU E LOGOUT)
