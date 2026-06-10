@@ -106,7 +106,7 @@ def init_connection():
 conn = init_connection()
 c = conn.cursor()
 
-# Criação/Atualização da Tabela com suporte à coluna de Código
+# Criação da tabela base
 c.execute('''
     CREATE TABLE IF NOT EXISTS materiais (
         id SERIAL PRIMARY KEY,
@@ -121,6 +121,7 @@ c.execute('''
 ''')
 conn.commit()
 
+# Garante o alinhamento da coluna codigo
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     conn.commit()
@@ -435,33 +436,58 @@ if st.session_state['perfil'] == "PCP":
             tamanho_opcoes = ["UNID/6", "UNID/12"]
 
             if tipo == "(W) I":
-                col3, col4 = st.columns(2)
+                col3, col4, col5, col6 = st.columns(4)
                 with col3:
-                    bitola = st.text_input("Bitola (mm)", key="cad_bit_wi")
+                    alma_sel = st.selectbox("Alma", ["1ª Alma", "2ª Alma", "Outro"], key="cad_alma_wi")
+                    if alma_sel == "Outro":
+                        alma_custom = st.text_input("Nº da Alma", key="cad_alma_cust_wi")
+                        alma_final = f"{alma_custom}ª Alma" if alma_custom else ""
+                    else:
+                        alma_final = alma_sel
                 with col4:
+                    dim_nom = st.text_input("Dim. Nominal (Pol)", key="cad_dim_wi")
+                with col5:
+                    espessura = st.text_input("Espessura (mm)", key="cad_esp_wi")
+                with col6:
                     tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_wi")
                     
-                nome = f"Perfil {tipo}"
-                dimensoes_para_salvar = f"Bitola: {bitola}mm | {tamanho}"
-                if not bitola: campos_vazios = True
+                nome = f"Perfil {tipo} {alma_final}".strip()
+                dim1 = dim_nom.replace('"', '').strip()
+                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm | {tamanho}'
+                if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
 
             elif tipo == "(W) H - HP":
-                col3, col4, col5 = st.columns(3)
+                col3, col4, col5, col6, col7 = st.columns(5)
                 with col3:
                     modelo = st.selectbox("Modelo", ["W", "HP"], key="cad_mod_whp")
                 with col4:
-                    bitola = st.text_input("Bitola (mm)", key="cad_bit_whp")
+                    alma_sel = st.selectbox("Alma", ["1ª Alma", "2ª Alma", "Outro"], key="cad_alma_whp")
+                    if alma_sel == "Outro":
+                        alma_custom = st.text_input("Nº da Alma", key="cad_alma_cust_whp")
+                        alma_final = f"{alma_custom}ª Alma" if alma_custom else ""
+                    else:
+                        alma_final = alma_sel
                 with col5:
+                    dim_nom = st.text_input("Dim. Nominal (Pol)", key="cad_dim_whp")
+                with col6:
+                    espessura = st.text_input("Espessura (mm)", key="cad_esp_whp")
+                with col7:
                     tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_whp")
                     
-                nome = f"Perfil {modelo}"
-                dimensoes_para_salvar = f"Bitola: {bitola}mm | {tamanho}"
-                if not bitola: campos_vazios = True
+                nome = f"Perfil {modelo} {alma_final}".strip()
+                dim1 = dim_nom.replace('"', '').strip()
+                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm | {tamanho}'
+                if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
 
             elif tipo in ["I - Abas Inclinadas", "U - Abas Inclinadas"]:
                 col3, col4, col5, col6 = st.columns(4)
                 with col3:
-                    modelo = st.selectbox("Modelo", ["Alma 1ª", "Alma 2ª"], key=f"cad_mod_{tipo[:1]}")
+                    modelo_sel = st.selectbox("Modelo", ["Alma 1ª", "Alma 2ª", "Outro"], key=f"cad_mod_{tipo[:1]}")
+                    if modelo_sel == "Outro":
+                        modelo_custom = st.text_input("Nº da Alma", key=f"cad_mod_cust_{tipo[:1]}")
+                        modelo = f"Alma {modelo_custom}ª" if modelo_custom else ""
+                    else:
+                        modelo = modelo_sel
                 with col4:
                     bit_h = st.text_input("Bitola h (Pol)", key=f"cad_h_{tipo[:1]}")
                 with col5:
@@ -470,11 +496,11 @@ if st.session_state['perfil'] == "PCP":
                     tamanho = st.selectbox("Tamanho", tamanho_opcoes, key=f"cad_tam_{tipo[:1]}")
                     
                 nome_base = "Perfil I" if "I -" in tipo else "Perfil U"
-                nome = f"{nome_base} Abas Inclinadas {modelo}"
+                nome = f"{nome_base} Abas Inclinadas {modelo}".strip()
                 dim_h = bit_h.replace('"', '').strip()
                 dim_b = bit_b.replace('"', '').strip()
                 dimensoes_para_salvar = f'h: {dim_h}" x b: {dim_b}" | {tamanho}'
-                if not bit_h or not bit_b: campos_vazios = True
+                if not bit_h or not bit_b or (modelo_sel == "Outro" and not modelo_custom): campos_vazios = True
 
             elif tipo == "U - Simples":
                 col3, col4, col5, col6 = st.columns(4)
@@ -938,7 +964,6 @@ if st.session_state['perfil'] == "PCP":
                 if alteracoes:
                     for row_idx, col_alteradas in alteracoes.items():
                         db_id = int(df_estoque.loc[row_idx, "id"])
-                        # Verifica apenas se o "Código" foi alterado
                         if "Código" in col_alteradas:
                             novo_codigo = col_alteradas["Código"]
                             if isinstance(novo_codigo, str):
