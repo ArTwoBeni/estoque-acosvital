@@ -106,7 +106,7 @@ def init_connection():
 conn = init_connection()
 c = conn.cursor()
 
-# Criação da tabela base
+# Criação/Atualização da Tabela com suporte à coluna de Código
 c.execute('''
     CREATE TABLE IF NOT EXISTS materiais (
         id SERIAL PRIMARY KEY,
@@ -121,7 +121,6 @@ c.execute('''
 ''')
 conn.commit()
 
-# Garante o alinhamento da coluna codigo
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     conn.commit()
@@ -428,7 +427,7 @@ if st.session_state['perfil'] == "PCP":
                     
                 nome = f"{tipo}"
                 dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}" if dim1 else ""'
+                dimensoes_para_salvar = f'{dim1}"' if dim1 else ""
                 if classe_sdr: dimensoes_para_salvar += f" | Classe: {classe_sdr.upper()}"
                 if not dim_nom: campos_vazios = True
 
@@ -900,7 +899,6 @@ if st.session_state['perfil'] == "PCP":
                         novo_saldo = saldo_atual + quantidade
                         msg = f"🚀 Entrada de {quantidade} unidades de '{nome_real}' realizada com sucesso!"
                     else:
-                        novo_saldo = saldo_atual - range
                         novo_saldo = saldo_atual - quantidade
                         msg = f"📉 Saída de {quantidade} unidades de '{nome_real}' realizada com sucesso!"
                     
@@ -914,59 +912,72 @@ if st.session_state['perfil'] == "PCP":
             elif df_final.empty:
                 st.warning("⚠️ Nenhum material encontrado no estoque com esses filtros.")
 
-    # --- ABA DE INVENTÁRIO COM EDIÇÃO DIRETA (Apenas PCP) ---
+    # --- ABA DE INVENTÁRIO (PCP) ---
     with aba_inventario:
         st.subheader("📋 Planilha de Inventário Dinâmica")
-        st.info("💡 Clique duas vezes em qualquer célula (como Código, Nome ou Saldo) para editar. Depois, clique no botão azul abaixo para salvar na nuvem!")
+        st.info("💡 Você pode editar APENAS a coluna de **Código** clicando duas vezes nela. Depois, clique em Salvar.")
         
-        # Puxamos o id para controle do banco, mas vamos escondê-lo no editor visual
-        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais")
+        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais ORDER BY nome")
         df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo"])
         
         if df_estoque.empty:
             st.info("O estoque está vazio.")
         else:
-            # O st.data_editor ativa a edição estilo Excel na tela
+            # Tabela de Edição com colunas travadas (exceto Código)
             edited_df = st.data_editor(
                 df_estoque,
                 hide_index=True,
                 use_container_width=True,
-                column_config={"id": None},  # Esconde completamente a coluna do ID do banco
+                column_config={"id": None},  # Esconde o ID
+                disabled=["Categoria", "Tipo", "Nome", "Dimensões", "Saldo"], # Trava as outras colunas
                 key="editor_inventario"
             )
             
-            # Processa e envia apenas as células modificadas para a nuvem
-            if st.button("💾 Salvar Alterações do Inventário", type="primary", use_container_width=True):
+            if st.button("💾 Salvar Alterações de Código", type="primary", use_container_width=True):
                 alteracoes = st.session_state["editor_inventario"]["edited_rows"]
                 if alteracoes:
-                    mapeamento = {
-                        "Código": "codigo",
-                        "Categoria": "categoria",
-                        "Tipo": "tipo",
-                        "Nome": "nome",
-                        "Dimensões": "dimensoes",
-                        "Saldo": "saldo"
-                    }
                     for row_idx, col_alteradas in alteracoes.items():
                         db_id = int(df_estoque.loc[row_idx, "id"])
-                        for col_nome, novo_valor in col_alteradas.items():
-                            col_db = mapeamento.get(col_nome)
-                            if col_db:
-                                if col_db in ["codigo", "categoria", "tipo", "nome", "dimensoes"] and isinstance(novo_valor, str):
-                                    novo_valor = novo_valor.strip().upper()
-                                c.execute(f"UPDATE materiais SET {col_db} = %s WHERE id = %s", (novo_valor, db_id))
+                        # Verifica apenas se o "Código" foi alterado
+                        if "Código" in col_alteradas:
+                            novo_codigo = col_alteradas["Código"]
+                            if isinstance(novo_codigo, str):
+                                novo_codigo = novo_codigo.strip().upper()
+                            c.execute("UPDATE materiais SET codigo = %s WHERE id = %s", (novo_codigo, db_id))
                     conn.commit()
-                    st.success("✅ Alterações salvas com sucesso no banco de dados!")
+                    st.success("✅ Códigos atualizados com sucesso no banco de dados!")
                     st.rerun()
                 else:
-                    st.info("💡 Nenhuma alteração foi realizada na planilha para ser salva.")
+                    st.info("💡 Nenhuma alteração de código foi realizada para ser salva.")
+            
+            st.markdown("---")
+            st.subheader("🗑️ Excluir Cadastro de Material")
+            st.warning("⚠️ Atenção: Esta ação apagará o material e seu saldo do banco de dados definitivamente. Utilize para corrigir erros de cadastro.")
+            
+            # Formata a lista para o campo de exclusão (similar ao de movimentação)
+            df_estoque['identificador_exclusao'] = df_estoque.apply(
+                lambda r: f"[{r['Código']}] {r['Nome']} - {r['Dimensões']} | Saldo: {int(r['Saldo'])}" if r['Código'] and r['Código'] != "-" else f"{r['Nome']} - {r['Dimensões']} | Saldo: {int(r['Saldo'])}", axis=1
+            )
+            
+            item_excluir = st.selectbox("Selecione o material que deseja excluir:", [""] + df_estoque['identificador_exclusao'].tolist(), key="select_excluir")
+            
+            if item_excluir != "":
+                linha_del = df_estoque[df_estoque['identificador_exclusao'] == item_excluir]
+                id_del = int(linha_del['id'].values[0])
+                nome_del = f"{linha_del['Nome'].values[0]} {linha_del['Dimensões'].values[0]}"
+                
+                if st.button(f"🚨 Confirmar Exclusão: {nome_del}", use_container_width=True):
+                    c.execute("DELETE FROM materiais WHERE id = %s", (id_del,))
+                    conn.commit()
+                    st.success(f"✅ Material '{nome_del}' removido do catálogo com sucesso!")
+                    st.rerun()
 
 # ==========================================
 # SE FOR VENDEDOR: Visualização 100% Bloqueada (Apenas Leitura)
 # ==========================================
 elif st.session_state['perfil'] == "VENDEDOR":
     st.subheader("📋 Inventário Atualizado em Tempo Real")
-    c.execute("SELECT codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais")
+    c.execute("SELECT codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais ORDER BY nome")
     df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo"])
     
     if df_estoque.empty:
