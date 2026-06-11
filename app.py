@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import psycopg2
 import os
+import re
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Controle de Estoque - Aços Vital", layout="wide")
@@ -106,7 +107,7 @@ def init_connection():
 conn = init_connection()
 c = conn.cursor()
 
-# Criação/Atualização da Tabela com suporte à coluna de Código
+# Criação da tabela base
 c.execute('''
     CREATE TABLE IF NOT EXISTS materiais (
         id SERIAL PRIMARY KEY,
@@ -116,13 +117,18 @@ c.execute('''
         nome TEXT,
         dimensoes TEXT,
         unidade TEXT,
-        saldo REAL
+        saldo REAL,
+        filial TEXT,
+        valor_kg TEXT
     )
 ''')
 conn.commit()
 
+# Garante o alinhamento das colunas recém-adicionadas para o banco antigo
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS valor_kg TEXT;")
     conn.commit()
 except:
     pass
@@ -145,12 +151,15 @@ if st.session_state['perfil'] == "PCP":
             "CONSTRUÇÃO CIVIL": ["Vergalhões CA - 25", "Vergalhões CA - 50", "Vergalhões CA - 60", "Arame Recozido", "Barra de Transferência", "Tela Soldada Nervurada", "Telha", "Treliça"]
         }
 
-        col1, col2, col3_cod = st.columns([1.5, 1.5, 1])
+        col1, col2 = st.columns(2)
         with col1:
             categoria = st.selectbox("Categoria", list(categorias_catalogo.keys()), key="cad_cat_principal")
         with col2:
             tipo = st.selectbox("Tipo", categorias_catalogo[categoria], key="cad_tipo_principal")
-        with col3_cod:
+            
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_cod, col_filial, col_valor = st.columns([1.5, 1, 1])
+        with col_cod:
             codigo = st.text_input("Código do Material (Opcional)", key="cad_codigo")
             if codigo:
                 codigo_limpo = codigo.strip().upper()
@@ -158,9 +167,15 @@ if st.session_state['perfil'] == "PCP":
                 registro_existente = c.fetchone()
                 if registro_existente:
                     st.warning(f"⚠️ Código já cadastrado em: {registro_existente[0]} ({registro_existente[1]})")
+        with col_filial:
+            filial_selecionada = st.selectbox("Aços Vital (Filial)", ["SP", "MG"], key="cad_filial")
+        with col_valor:
+            valor_kg = st.text_input("Valor / kg (R$)", help="Ex: 15,50", key="cad_valor_kg")
+        st.markdown("<hr style='margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
                     
         nome = ""
         dimensoes_para_salvar = ""
+        unidade_para_salvar = "UNID" # Valor padrão se não tiver escolha de Tamanho
         campos_vazios = False 
 
         if categoria == "FLANGES":
@@ -344,7 +359,8 @@ if st.session_state['perfil'] == "PCP":
                     with col5:
                         tamanho = st.selectbox("Tamanho", ["UNID/6", "UNID/12"], key="cad_tam_quad")
                     nome = f"Tubo {tipo} {modelo}"
-                    dimensoes_para_salvar = f"Bitola: {bitola}mm | Esp: {espessura}mm | {tamanho}"
+                    dimensoes_para_salvar = f"Bitola: {bitola}mm | Esp: {espessura}mm"
+                    unidade_para_salvar = tamanho
                     if not bitola or not espessura: campos_vazios = True
                     
                 elif modelo == "Retangulares":
@@ -358,7 +374,8 @@ if st.session_state['perfil'] == "PCP":
                     with col6:
                         tamanho = st.selectbox("Tamanho", ["UNID/6", "UNID/12"], key="cad_tam_ret")
                     nome = f"Tubo {tipo} {modelo}"
-                    dimensoes_para_salvar = f"Bitola: {bitola_l}x{bitola_c}mm | Esp: {espessura}mm | {tamanho}"
+                    dimensoes_para_salvar = f"Bitola: {bitola_l}x{bitola_c}mm | Esp: {espessura}mm"
+                    unidade_para_salvar = tamanho
                     if not bitola_l or not bitola_c or not espessura: campos_vazios = True
                     
                 else: 
@@ -371,7 +388,8 @@ if st.session_state['perfil'] == "PCP":
                         tamanho = st.selectbox("Tamanho", ["UNID/6", "UNID/12"], key="cad_tam_tubo")
                     nome = f"Tubo {tipo} {modelo}"
                     dim1 = dim_nom.replace('"', '').strip()
-                    dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm | {tamanho}'
+                    dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm'
+                    unidade_para_salvar = tamanho
                     if not dim_nom or not espessura: campos_vazios = True
 
             elif lista_modelos:
@@ -387,7 +405,8 @@ if st.session_state['perfil'] == "PCP":
                     
                 nome = f"Tubo {tipo} {modelo}"
                 dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm | {tamanho}'
+                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm'
+                unidade_para_salvar = tamanho
                 if not dim_nom or not espessura: campos_vazios = True
                 
             else: 
@@ -401,7 +420,8 @@ if st.session_state['perfil'] == "PCP":
                     
                 nome = f"Tubo {tipo}"
                 dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm | {tamanho}'
+                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm'
+                unidade_para_salvar = tamanho
                 if not dim_nom or not espessura: campos_vazios = True
 
         elif categoria == "LINHA PEAD":
@@ -452,7 +472,8 @@ if st.session_state['perfil'] == "PCP":
                     
                 nome = f"Perfil {tipo} {alma_final}".strip()
                 dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm | {tamanho}'
+                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm'
+                unidade_para_salvar = tamanho
                 if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
 
             elif tipo == "(W) H - HP":
@@ -475,7 +496,8 @@ if st.session_state['perfil'] == "PCP":
                     
                 nome = f"Perfil {modelo} {alma_final}".strip()
                 dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm | {tamanho}'
+                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm'
+                unidade_para_salvar = tamanho
                 if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
 
             elif tipo in ["I - Abas Inclinadas", "U - Abas Inclinadas"]:
@@ -498,7 +520,8 @@ if st.session_state['perfil'] == "PCP":
                 nome = f"{nome_base} Abas Inclinadas {modelo}".strip()
                 dim_h = bit_h.replace('"', '').strip()
                 dim_b = bit_b.replace('"', '').strip()
-                dimensoes_para_salvar = f'h: {dim_h}" x b: {dim_b}" | {tamanho}'
+                dimensoes_para_salvar = f'h: {dim_h}" x b: {dim_b}"'
+                unidade_para_salvar = tamanho
                 if not bit_h or not bit_b or (modelo_sel == "Outro" and not modelo_custom): campos_vazios = True
 
             elif tipo == "U - Simples":
@@ -513,7 +536,8 @@ if st.session_state['perfil'] == "PCP":
                     tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_us")
                     
                 nome = "Perfil U Simples"
-                dimensoes_para_salvar = f"h: {bit_h}mm x b: {bit_b}mm | Esp: {esp}mm | {tamanho}"
+                dimensoes_para_salvar = f"h: {bit_h}mm x b: {bit_b}mm | Esp: {esp}mm"
+                unidade_para_salvar = tamanho
                 if not bit_h or not bit_b or not esp: campos_vazios = True
 
             elif tipo == "U - Enrijecido":
@@ -530,7 +554,8 @@ if st.session_state['perfil'] == "PCP":
                     tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_ue")
                     
                 nome = "Perfil U Enrijecido"
-                dimensoes_para_salvar = f"h: {bit_h} x b: {bit_b} x Aba: {aba} | Esp: {esp}mm | {tamanho}"
+                dimensoes_para_salvar = f"h: {bit_h} x b: {bit_b} x Aba: {aba} | Esp: {esp}mm"
+                unidade_para_salvar = tamanho
                 if not bit_h or not bit_b or not aba or not esp: campos_vazios = True
 
             elif tipo == "Cantoneira - Abas Iguais":
@@ -545,7 +570,8 @@ if st.session_state['perfil'] == "PCP":
                 nome = "Cantoneira Abas Iguais"
                 dim1 = bitola.replace('"', '').strip()
                 dim2 = esp.replace('"', '').strip()
-                dimensoes_para_salvar = f'Bitola: {dim1}" | Esp: {dim2}" | {tamanho}'
+                dimensoes_para_salvar = f'Bitola: {dim1}" | Esp: {dim2}"'
+                unidade_para_salvar = tamanho
                 if not bitola or not esp: campos_vazios = True
 
             elif tipo == "Cantoneira - Abas Desiguais":
@@ -563,7 +589,8 @@ if st.session_state['perfil'] == "PCP":
                 dim_h = bit_h.replace('"', '').strip()
                 dim_b = bit_b.replace('"', '').strip()
                 dim_esp = esp.replace('"', '').strip()
-                dimensoes_para_salvar = f'h: {dim_h}" x b: {dim_b}" | Esp: {dim_esp}" | {tamanho}'
+                dimensoes_para_salvar = f'h: {dim_h}" x b: {dim_b}" | Esp: {dim_esp}"'
+                unidade_para_salvar = tamanho
                 if not bit_h or not bit_b or not esp: campos_vazios = True
 
             elif tipo == "Barra Redonda":
@@ -575,7 +602,8 @@ if st.session_state['perfil'] == "PCP":
                     
                 nome = "Barra Redonda"
                 dim1 = bitola.replace('"', '').strip()
-                dimensoes_para_salvar = f'Bitola: {dim1}" | {tamanho}'
+                dimensoes_para_salvar = f'Bitola: {dim1}"'
+                unidade_para_salvar = tamanho
                 if not bitola: campos_vazios = True
 
             elif tipo == "Barra Chata":
@@ -590,7 +618,8 @@ if st.session_state['perfil'] == "PCP":
                 nome = "Barra Chata"
                 dim1 = larg.replace('"', '').strip()
                 dim2 = esp.replace('"', '').strip()
-                dimensoes_para_salvar = f'Larg: {dim1}" | Esp: {dim2}" | {tamanho}'
+                dimensoes_para_salvar = f'Larg: {dim1}" | Esp: {dim2}"'
+                unidade_para_salvar = tamanho
                 if not larg or not esp: campos_vazios = True
 
         elif categoria == "CHAPAS E GRADES":
@@ -792,21 +821,26 @@ if st.session_state['perfil'] == "PCP":
             dimensoes_limpas = dimensoes_para_salvar.strip().upper()
             cod_final = codigo.strip().upper() if codigo else "-"
             
+            # Filtro inteligente para manter apenas números e vírgula no campo de Valor/kg
+            valor_kg_limpo = re.sub(r'[^0-9,]', '', valor_kg) if valor_kg else "-"
+            if not valor_kg_limpo: 
+                valor_kg_limpo = "-"
+            
             if campos_vazios:
                 st.warning("⚠️ Por favor, preencha todos os campos obrigatórios da peça!")
             else:
                 c.execute('''
                     SELECT id FROM materiais 
-                    WHERE categoria = %s AND tipo = %s AND nome = %s AND dimensoes = %s
-                ''', (categoria, tipo, nome_limpo, dimensoes_limpas))
+                    WHERE categoria = %s AND tipo = %s AND nome = %s AND dimensoes = %s AND filial = %s
+                ''', (categoria, tipo, nome_limpo, dimensoes_limpas, filial_selecionada))
                 
                 if c.fetchone():
-                    st.error(f"❌ Cadastro Bloqueado: O material '{nome_limpo}' com essas dimensões já existe no catálogo!")
+                    st.error(f"❌ Cadastro Bloqueado: O material '{nome_limpo}' com essas dimensões já existe na filial {filial_selecionada}!")
                 else:
                     c.execute('''
-                        INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, "-", quantidade))
+                        INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo, filial, valor_kg)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, quantidade, filial_selecionada, valor_kg_limpo))
                     conn.commit()
                     st.success(f"✅ Material '{nome_limpo}' cadastrado com sucesso!")
                     st.rerun()
@@ -814,14 +848,15 @@ if st.session_state['perfil'] == "PCP":
     with aba_movimentacao:
         st.subheader("🔄 Movimentação de Estoque")
 
-        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais")
-        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "codigo", "categoria", "tipo", "nome", "dimensoes", "saldo"])
+        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo, unidade, filial, valor_kg FROM materiais")
+        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "codigo", "categoria", "tipo", "nome", "dimensoes", "saldo", "unidade", "filial", "valor_kg"])
 
         if df_materiais.empty:
             st.info("💡 Cadastre pelo menos um material no formulário acima para poder realizar movimentações.")
         else:
+            # O Identificador agora mostra tudo, incluindo a filial e o valor/kg
             df_materiais['identificador'] = df_materiais.apply(
-                lambda r: f"[{r['codigo']}] {r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}" if r['codigo'] != "-" else f"{r['nome']} - {r['dimensoes']} | Saldo: {int(r['saldo'])}", axis=1
+                lambda r: f"[{r['codigo']}] {r['nome']} - {r['dimensoes']} | {r['filial']} | Saldo: {int(r['saldo'])} {r['unidade']} | R$ {r['valor_kg']}/kg" if str(r['codigo']) != "-" else f"{r['nome']} - {r['dimensoes']} | {r['filial']} | Saldo: {int(r['saldo'])} {r['unidade']} | R$ {r['valor_kg']}/kg", axis=1
             )
 
             st.markdown("**1. Localize o Material**")
@@ -940,51 +975,58 @@ if st.session_state['perfil'] == "PCP":
     # --- ABA DE INVENTÁRIO (PCP) ---
     with aba_inventario:
         st.subheader("📋 Planilha de Inventário Dinâmica")
-        st.info("💡 Você pode editar APENAS a coluna de **Código** clicando duas vezes nela. Depois, clique em Salvar.")
+        st.info("💡 Você pode editar as colunas **Código** e **Valor / kg** clicando duas vezes nelas. Depois, clique em Salvar.")
         
-        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais ORDER BY nome")
-        df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo"])
+        c.execute("SELECT id, codigo, filial, categoria, tipo, nome, dimensoes, saldo, unidade, valor_kg FROM materiais ORDER BY nome")
+        df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Aços Vital", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo", "UNID", "Valor / kg"])
         
         if df_estoque.empty:
             st.info("O estoque está vazio.")
         else:
-            # Tabela de Edição com colunas travadas e ocultas para limpeza visual
             edited_df = st.data_editor(
                 df_estoque,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "id": None,          # Esconde o ID do banco
-                    "Categoria": None,   # Esconde a Categoria para limpar a tela
-                    "Tipo": None         # Esconde o Tipo (pois já está no Nome)
+                    "id": None,
+                    "Categoria": None,
+                    "Tipo": None
                 },
-                disabled=["Categoria", "Tipo", "Nome", "Dimensões", "Saldo"], # Trava as outras colunas
+                disabled=["Aços Vital", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo", "UNID"],
                 key="editor_inventario"
             )
             
-            if st.button("💾 Salvar Alterações de Código", type="primary", use_container_width=True):
+            if st.button("💾 Salvar Alterações de Código e Valor", type="primary", use_container_width=True):
                 alteracoes = st.session_state["editor_inventario"]["edited_rows"]
                 if alteracoes:
                     for row_idx, col_alteradas in alteracoes.items():
                         db_id = int(df_estoque.loc[row_idx, "id"])
+                        
                         if "Código" in col_alteradas:
                             novo_codigo = col_alteradas["Código"]
-                            if isinstance(novo_codigo, str):
-                                novo_codigo = novo_codigo.strip().upper()
+                            novo_codigo = str(novo_codigo).strip().upper() if novo_codigo else "-"
                             c.execute("UPDATE materiais SET codigo = %s WHERE id = %s", (novo_codigo, db_id))
+                            
+                        if "Valor / kg" in col_alteradas:
+                            novo_valor = col_alteradas["Valor / kg"]
+                            if novo_valor:
+                                novo_valor = re.sub(r'[^0-9,]', '', str(novo_valor))
+                            else:
+                                novo_valor = "-"
+                            c.execute("UPDATE materiais SET valor_kg = %s WHERE id = %s", (novo_valor, db_id))
+                            
                     conn.commit()
-                    st.success("✅ Códigos atualizados com sucesso no banco de dados!")
+                    st.success("✅ Alterações salvas com sucesso no banco de dados!")
                     st.rerun()
                 else:
-                    st.info("💡 Nenhuma alteração de código foi realizada para ser salva.")
+                    st.info("💡 Nenhuma alteração foi realizada para ser salva.")
             
             st.markdown("---")
             st.subheader("🗑️ Excluir Cadastro de Material")
             st.warning("⚠️ Atenção: Esta ação apagará o material e seu saldo do banco de dados definitivamente. Utilize para corrigir erros de cadastro.")
             
-            # Formata a lista para o campo de exclusão (similar ao de movimentação)
             df_estoque['identificador_exclusao'] = df_estoque.apply(
-                lambda r: f"[{r['Código']}] {r['Nome']} - {r['Dimensões']} | Saldo: {int(r['Saldo'])}" if r['Código'] and r['Código'] != "-" else f"{r['Nome']} - {r['Dimensões']} | Saldo: {int(r['Saldo'])}", axis=1
+                lambda r: f"[{r['Código']}] {r['Nome']} - {r['Dimensões']} | {r['Aços Vital']} | Saldo: {int(r['Saldo'])} {r['UNID']}" if r['Código'] and r['Código'] != "-" else f"{r['Nome']} - {r['Dimensões']} | {r['Aços Vital']} | Saldo: {int(r['Saldo'])} {r['UNID']}", axis=1
             )
             
             item_excluir = st.selectbox("Selecione o material que deseja excluir:", [""] + df_estoque['identificador_exclusao'].tolist(), key="select_excluir")
@@ -1005,8 +1047,8 @@ if st.session_state['perfil'] == "PCP":
 # ==========================================
 elif st.session_state['perfil'] == "VENDEDOR":
     st.subheader("📋 Inventário Atualizado em Tempo Real")
-    c.execute("SELECT codigo, categoria, tipo, nome, dimensoes, saldo FROM materiais ORDER BY nome")
-    df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo"])
+    c.execute("SELECT codigo, filial, categoria, tipo, nome, dimensoes, saldo, unidade, valor_kg FROM materiais ORDER BY nome")
+    df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Aços Vital", "Categoria", "Tipo", "Nome", "Dimensões", "Saldo", "UNID", "Valor / kg"])
     
     if df_estoque.empty:
         st.info("O estoque está vazio no momento.")
