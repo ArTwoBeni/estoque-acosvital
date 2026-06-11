@@ -106,7 +106,7 @@ def init_connection():
 conn = init_connection()
 c = conn.cursor()
 
-# Criação da tabela base
+# Criação/Atualização da Tabela com suporte à coluna de Código
 c.execute('''
     CREATE TABLE IF NOT EXISTS materiais (
         id SERIAL PRIMARY KEY,
@@ -121,7 +121,6 @@ c.execute('''
 ''')
 conn.commit()
 
-# Garante o alinhamento da coluna codigo
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     conn.commit()
@@ -949,12 +948,16 @@ if st.session_state['perfil'] == "PCP":
         if df_estoque.empty:
             st.info("O estoque está vazio.")
         else:
-            # Tabela de Edição com colunas travadas (exceto Código)
+            # Tabela de Edição com colunas travadas e ocultas para limpeza visual
             edited_df = st.data_editor(
                 df_estoque,
                 hide_index=True,
                 use_container_width=True,
-                column_config={"id": None},  # Esconde o ID
+                column_config={
+                    "id": None,          # Esconde o ID do banco
+                    "Categoria": None,   # Esconde a Categoria para limpar a tela
+                    "Tipo": None         # Esconde o Tipo (pois já está no Nome)
+                },
                 disabled=["Categoria", "Tipo", "Nome", "Dimensões", "Saldo"], # Trava as outras colunas
                 key="editor_inventario"
             )
@@ -1008,4 +1011,12 @@ elif st.session_state['perfil'] == "VENDEDOR":
     if df_estoque.empty:
         st.info("O estoque está vazio no momento.")
     else:
-        st.dataframe(df_estoque, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_estoque, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Categoria": None,
+                "Tipo": None
+            }
+        )
