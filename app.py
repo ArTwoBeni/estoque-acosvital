@@ -130,17 +130,55 @@ try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS valor_kg TEXT;")
     
-    # Arruma os valores Nulos das peças antigas
     c.execute("UPDATE materiais SET filial = '-' WHERE filial IS NULL")
     c.execute("UPDATE materiais SET valor_kg = '-' WHERE valor_kg IS NULL")
     
-    # Extrai UNID/6 e UNID/12 de dentro da coluna dimensoes e passa para unidade
+    # 1º Passo: Extrai UNID das dimensões
     c.execute("UPDATE materiais SET unidade = 'UNID/6', dimensoes = REPLACE(dimensoes, ' | UNID/6', '') WHERE dimensoes LIKE '% | UNID/6'")
     c.execute("UPDATE materiais SET unidade = 'UNID/12', dimensoes = REPLACE(dimensoes, ' | UNID/12', '') WHERE dimensoes LIKE '% | UNID/12'")
     c.execute("UPDATE materiais SET unidade = 'UNID' WHERE unidade IS NULL OR unidade = '-' OR unidade = ''")
     
+    # 2º Passo: Robô de Migração do Padrão Antigo para o Novo Padrão de Nomenclatura (Alma, SCH, Tubo-S)
+    c.execute("SELECT id, nome, dimensoes FROM materiais")
+    registros_antigos = c.fetchall()
+    
+    for row in registros_antigos:
+        db_id, n, d = row
+        update_needed = False
+        
+        # Arruma Alma nos Perfis Laminados
+        match_alma = re.search(r'(\d+ª ALMA|ALMA \d+ª)', n)
+        if match_alma and not d.startswith(match_alma.group(1)):
+            n = n.replace(" " + match_alma.group(1), "")
+            d = f"{match_alma.group(1)} | {d}"
+            update_needed = True
+
+        # Arruma SCH nos Tubos
+        match_sch = re.search(r'(SCH \d+)', n)
+        if match_sch and not d.startswith(match_sch.group(1)):
+            n = n.replace(" " + match_sch.group(1), "")
+            d = f"{match_sch.group(1)} | {d}"
+            update_needed = True
+
+        # Arruma -S nos Tubos Inox
+        match_s = re.search(r'(\d+-S)', n)
+        if match_s and not d.startswith(match_s.group(1)):
+            n = n.replace(" " + match_s.group(1), "")
+            d = f"{match_s.group(1)} | {d}"
+            update_needed = True
+            
+        # Arruma Conexões que o SCH foi parar no final da dimensão
+        if " | SCH: " in d:
+            parts = d.split(" | SCH: ")
+            d = f"SCH {parts[1]} | {parts[0]}"
+            update_needed = True
+
+        if update_needed:
+            c.execute("UPDATE materiais SET nome = %s, dimensoes = %s WHERE id = %s", (n.strip(), d.strip(), db_id))
+            
     conn.commit()
-except:
+except Exception as e:
+    print(f"Rotina executada ou ignorada. Info: {e}")
     pass
 
 # --- LÓGICA DE EXIBIÇÃO POR PERFIL ---
@@ -248,7 +286,7 @@ if st.session_state['perfil'] == "PCP":
                     
                 dimensao_limpa = dim_nom.replace('"', '').strip()
                 dimensoes_para_salvar = f'{dimensao_limpa}"' if dimensao_limpa else ""
-                if schedule: dimensoes_para_salvar += f" | SCH: {schedule.upper()}"
+                if schedule: dimensoes_para_salvar = f"SCH {schedule.upper()} | " + dimensoes_para_salvar
                 if not dim_nom or (modelo_curva == "Curva outro °" and not grau_custom): campos_vazios = True
 
             elif tipo == "Cruz (ASME B16.9 ou Inox MSS SP-43)":
@@ -262,7 +300,7 @@ if st.session_state['perfil'] == "PCP":
                     
                 dimensao_limpa = dim_nom.replace('"', '').strip()
                 dimensoes_para_salvar = f'{dimensao_limpa}"' if dimensao_limpa else ""
-                if schedule: dimensoes_para_salvar += f" | SCH: {schedule.upper()}"
+                if schedule: dimensoes_para_salvar = f"SCH {schedule.upper()} | " + dimensoes_para_salvar
                 if not dim_nom: campos_vazios = True
 
             elif tipo in ["Redução (ASME B16.9 ou Inox MSS SP-43)", "Niple de Redução (ASME B16.9 ou MSSP-95)"]:
@@ -285,7 +323,7 @@ if st.session_state['perfil'] == "PCP":
                 dim1 = dim_nom.replace('"', '').strip()
                 dim2 = dim_red.replace('"', '').strip()
                 dimensoes_para_salvar = f'{dim1}" x {dim2}" | Comp: {comp}mm'
-                if schedule: dimensoes_para_salvar += f" | SCH: {schedule.upper()}"
+                if schedule: dimensoes_para_salvar = f"SCH {schedule.upper()} | " + dimensoes_para_salvar
                 if not dim_nom or not dim_red or not comp: campos_vazios = True
 
             elif tipo == "Pestana (ASME B16.9 ou Inox MSS SP-43)":
@@ -413,9 +451,12 @@ if st.session_state['perfil'] == "PCP":
                 with col6:
                     tamanho = st.selectbox("Tamanho", ["UNID/6", "UNID/12"], key="cad_tam_tubo")
                     
-                nome = f"Tubo {tipo} {modelo}"
+                nome = f"Tubo {tipo}"
                 dim1 = dim_nom.replace('"', '').strip()
-                dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm'
+                if modelo and modelo != "Nenhum":
+                    dimensoes_para_salvar = f'{modelo} | {dim1}" | Esp: {espessura}mm'
+                else:
+                    dimensoes_para_salvar = f'{dim1}" | Esp: {espessura}mm'
                 unidade_para_salvar = tamanho
                 if not dim_nom or not espessura: campos_vazios = True
                 
@@ -988,7 +1029,6 @@ if st.session_state['perfil'] == "PCP":
         st.subheader("📋 Planilha de Inventário Dinâmica")
         st.info("💡 Você pode editar as colunas **Código** e **Valor / kg** clicando duas vezes nelas. Depois, clique em Salvar.")
         
-        # Coleta os dados trazendo a 'categoria' do banco como "Categoria" e 'nome' como "Tipo"
         c.execute("SELECT id, codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg FROM materiais ORDER BY nome")
         df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg"])
         
@@ -999,7 +1039,6 @@ if st.session_state['perfil'] == "PCP":
                 df_estoque,
                 hide_index=True,
                 use_container_width=True,
-                # Usa column_config para dar tamanhos dinâmicos (large/medium/small) melhorando a visibilidade
                 column_config={
                     "id": None,
                     "Código": st.column_config.TextColumn("Código", width="small"),
