@@ -57,7 +57,7 @@ if not st.session_state['logged_in']:
 
         # --- DICIONÁRIO DE USUÁRIOS E SENHAS ---
         usuarios_pcp = {
-            "denis.pcp": "Heitor2024",
+            "denis.pcp": "Davi&Heitor",
             "joao.pcp": "46993061"
         }
 
