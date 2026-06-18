@@ -3,6 +3,7 @@ import pandas as pd
 import psycopg2
 import os
 import re
+import datetime
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Controle de Estoque - Aços Vital", layout="wide")
@@ -41,6 +42,8 @@ if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'perfil' not in st.session_state:
     st.session_state['perfil'] = ''
+if 'usuario_nome' not in st.session_state:
+    st.session_state['usuario_nome'] = ''
 
 if not st.session_state['logged_in']:
     col1, col2, col3 = st.columns([1.5, 1, 1.5]) 
@@ -57,8 +60,8 @@ if not st.session_state['logged_in']:
 
         # --- DICIONÁRIO DE USUÁRIOS E SENHAS ---
         usuarios_pcp = {
-            "denis.pcp": "Davi&Heitor",
-            "joao.pcp": "46993062" ,
+            "denis.pcp": "Heitor2024",
+            "joao.pcp": "46993061",
             "jonathan.pcp": "120910"
         }
 
@@ -66,14 +69,24 @@ if not st.session_state['logged_in']:
             "vendas": "AcosVital@2026"
         }
 
+        # Mapeamento de nomes amigáveis para o Log de Auditoria
+        nomes_exibicao = {
+            "denis.pcp": "Denis",
+            "joao.pcp": "João V.",
+            "jonathan.pcp": "Jonathan",
+            "vendas": "Vendas"
+        }
+
         if btn_login:
             if usuario in usuarios_pcp and senha == usuarios_pcp[usuario]:
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "PCP"
+                st.session_state['usuario_nome'] = nomes_exibicao.get(usuario, usuario)
                 st.rerun()
             elif usuario in usuarios_vendas and senha == usuarios_vendas[usuario]:
                 st.session_state['logged_in'] = True
                 st.session_state['perfil'] = "VENDEDOR"
+                st.session_state['usuario_nome'] = nomes_exibicao.get(usuario, usuario)
                 st.rerun()
             else:
                 st.error("❌ Usuário ou senha incorretos!")
@@ -86,11 +99,13 @@ if not st.session_state['logged_in']:
 if logo_path:
     st.sidebar.image(logo_path, use_container_width=True)
 
-st.sidebar.markdown(f"**👤 Perfil:** {st.session_state['perfil']}")
+st.sidebar.markdown(f"**👤 Operador:** {st.session_state['usuario_nome']}")
+st.sidebar.markdown(f"**💼 Perfil:** {st.session_state['perfil']}")
 st.sidebar.markdown("---")
 if st.sidebar.button("🚪 Sair do Sistema", use_container_width=True):
     st.session_state['logged_in'] = False
     st.session_state['perfil'] = ''
+    st.session_state['usuario_nome'] = ''
     st.rerun()
 
 # ==========================================
@@ -108,7 +123,7 @@ def init_connection():
 conn = init_connection()
 c = conn.cursor()
 
-# Criação da tabela base
+# Criação da tabela base de materiais
 c.execute('''
     CREATE TABLE IF NOT EXISTS materiais (
         id SERIAL PRIMARY KEY,
@@ -123,64 +138,73 @@ c.execute('''
         valor_kg TEXT
     )
 ''')
+
+# Criação da tabela de histórico (Log de Auditoria)
+c.execute('''
+    CREATE TABLE IF NOT EXISTS historico_movimentacao (
+        id SERIAL PRIMARY KEY,
+        data_hora TIMESTAMP,
+        usuario TEXT,
+        categoria TEXT,
+        tipo TEXT,
+        nome TEXT,
+        dimensoes TEXT,
+        unidade TEXT,
+        operacao TEXT,
+        quantidade REAL
+    )
+''')
 conn.commit()
 
-# --- ROTINA DE LIMPEZA E ATUALIZAÇÃO AUTOMÁTICA DO BANCO ---
+# Ajuste automático de colunas estruturais
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS valor_kg TEXT;")
-    
     c.execute("UPDATE materiais SET filial = '-' WHERE filial IS NULL")
     c.execute("UPDATE materiais SET valor_kg = '-' WHERE valor_kg IS NULL")
     
-    # 1º Passo: Extrai UNID das dimensões
     c.execute("UPDATE materiais SET unidade = 'UNID/6', dimensoes = REPLACE(dimensoes, ' | UNID/6', '') WHERE dimensoes LIKE '% | UNID/6'")
     c.execute("UPDATE materiais SET unidade = 'UNID/12', dimensoes = REPLACE(dimensoes, ' | UNID/12', '') WHERE dimensoes LIKE '% | UNID/12'")
     c.execute("UPDATE materiais SET unidade = 'UNID' WHERE unidade IS NULL OR unidade = '-' OR unidade = ''")
-    
-    # 2º Passo: Robô de Migração do Padrão Antigo para o Novo Padrão de Nomenclatura (Alma, SCH, Tubo-S)
-    c.execute("SELECT id, nome, dimensoes FROM materiais")
-    registros_antigos = c.fetchall()
-    
-    for row in registros_antigos:
-        db_id, n, d = row
-        update_needed = False
-        
-        # Arruma Alma nos Perfis Laminados
-        match_alma = re.search(r'(\d+ª ALMA|ALMA \d+ª)', n)
-        if match_alma and not d.startswith(match_alma.group(1)):
-            n = n.replace(" " + match_alma.group(1), "")
-            d = f"{match_alma.group(1)} | {d}"
-            update_needed = True
-
-        # Arruma SCH nos Tubos
-        match_sch = re.search(r'(SCH \d+)', n)
-        if match_sch and not d.startswith(match_sch.group(1)):
-            n = n.replace(" " + match_sch.group(1), "")
-            d = f"{match_sch.group(1)} | {d}"
-            update_needed = True
-
-        # Arruma -S nos Tubos Inox
-        match_s = re.search(r'(\d+-S)', n)
-        if match_s and not d.startswith(match_s.group(1)):
-            n = n.replace(" " + match_s.group(1), "")
-            d = f"{match_s.group(1)} | {d}"
-            update_needed = True
-            
-        # Arruma Conexões que o SCH foi parar no final da dimensão
-        if " | SCH: " in d:
-            parts = d.split(" | SCH: ")
-            d = f"SCH {parts[1]} | {parts[0]}"
-            update_needed = True
-
-        if update_needed:
-            c.execute("UPDATE materiais SET nome = %s, dimensoes = %s WHERE id = %s", (n.strip(), d.strip(), db_id))
-            
     conn.commit()
-except Exception as e:
-    print(f"Rotina executada ou ignorada. Info: {e}")
+except:
     pass
+
+# --- FUNÇÃO AUXILIAR: FUSO HORÁRIO DE BRASÍLIA ---
+def obter_agora_br():
+    tz_br = datetime.timezone(datetime.timedelta(hours=-3))
+    return datetime.datetime.now(tz_br)
+
+# --- FUNÇÃO AUXILIAR: EXIBIÇÃO DO HISTÓRICO NAS ABAS ---
+def exibir_historico_operacoes():
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.subheader("⏱️ Histórico de Confirmação de Ações Recentes")
+    
+    c.execute('''
+        SELECT data_hora, usuario, categoria, nome, dimensoes, unidade, operacao, quantidade 
+        FROM historico_movimentacao 
+        ORDER BY data_hora DESC LIMIT 15
+    ''')
+    logs = c.fetchall()
+    
+    if not logs:
+        st.info("Nenhum registo de atividade encontrado no sistema.")
+    else:
+        df_logs = pd.DataFrame(logs, columns=["Data_Hora_Raw", "Quem fez a movimentação", "Categoria", "Tipo", "Dimensões", "UNID", "Entrada/Saida", "Quantidade"])
+        
+        # Formatação de Data e Hora conforme especificação
+        df_logs['Data da movimentação'] = pd.to_datetime(df_logs['Data_Hora_Raw']).dt.strftime('%d/%m/%Y')
+        df_logs['Horas da movimentação'] = pd.to_datetime(df_logs['Data_Hora_Raw']).dt.strftime('%H:%M')
+        
+        # Organização visual final das colunas
+        df_final_logs = df_logs[[
+            "Data da movimentação", "Horas da movimentação", "Quem fez a movimentação", 
+            "Categoria", "Tipo", "Dimensões", "UNID", "Entrada/Saida", "Quantidade"
+        ]]
+        
+        st.dataframe(df_final_logs, use_container_width=True, hide_index=True)
 
 # --- LÓGICA DE EXIBIÇÃO POR PERFIL ---
 
@@ -526,7 +550,7 @@ if st.session_state['perfil'] == "PCP":
                 dim1 = dim_nom.replace('"', '').strip()
                 prefixo_alma = f"{alma_final} | " if alma_final else ""
                 dimensoes_para_salvar = f'{prefixo_alma}{dim1}" | Esp: {espessura}mm'
-                unidade_para_salvar = tamanho
+                unidade_para_salvar = size_wi = tamanho
                 if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
 
             elif tipo == "(W) H - HP":
@@ -692,7 +716,7 @@ if st.session_state['perfil'] == "PCP":
                 dimensoes_para_salvar = f"Bitola: {bitola}mm | {comp}m x {larg}m"
                 if not bitola or not comp or not larg: campos_vazios = True
 
-            elif tipo in ["Grossa", "Xadrez", "Zincada"]:
+            elif tipo iand ["Grossa", "Xadrez", "Zincada"]:
                 col3, col4, col5 = st.columns(3)
                 with col3:
                     esp = st.text_input("Espessura (Pol)", key=f"cad_esp_{tipo[:4]}")
@@ -895,9 +919,19 @@ if st.session_state['perfil'] == "PCP":
                         INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo, filial, valor_kg)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, quantidade, filial_selecionada, valor_kg_limpo))
+                    
+                    # Carimba a ação no Histórico
+                    c.execute('''
+                        INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (obter_agora_br(), st.session_state['usuario_nome'], categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, 'CADASTRO', quantidade))
+                    
                     conn.commit()
                     st.success(f"✅ Material '{nome_limpo}' cadastrado com sucesso!")
                     st.rerun()
+
+        # Renderização do histórico no final da primeira aba
+        exibir_historico_operacoes()
 
     with aba_movimentacao:
         st.subheader("🔄 Movimentação de Estoque")
@@ -1008,6 +1042,7 @@ if st.session_state['perfil'] == "PCP":
                 btn_movimentar = st.button("Confirmar Movimentação", use_container_width=True, type="primary")
                 
                 if btn_movimentar:
+                    op_log = 'ENTRADA' if operacao == "Entrada (Soma)" else 'SAÍDA'
                     if operacao == "Entrada (Soma)":
                         novo_saldo = saldo_atual + quantidade
                         msg = f"🚀 Entrada de {quantidade} unidades de '{nome_real}' realizada com sucesso!"
@@ -1019,11 +1054,21 @@ if st.session_state['perfil'] == "PCP":
                         st.error(f"❌ Erro: Saldo insuficiente. O estoque atual é de apenas {int(saldo_atual)}.")
                     else:
                         c.execute("UPDATE materiais SET saldo = %s WHERE id = %s", (novo_saldo, id_real))
+                        
+                        # Grava a movimentação no histórico
+                        c.execute('''
+                            INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ''', (obter_agora_br(), st.session_state['usuario_nome'], linha_selecionada['categoria'].values[0], linha_selecionada['tipo'].values[0], linha_selecionada['nome'].values[0], linha_selecionada['dimensoes'].values[0], linha_selecionada['unidade'].values[0], op_log, quantidade))
+                        
                         conn.commit()
                         st.success(msg)
                         st.rerun()
             elif df_final.empty:
                 st.warning("⚠️ Nenhum material encontrado no estoque com esses filtros.")
+
+        # Renderização do histórico no final da segunda aba
+        exibir_historico_operacoes()
 
     # --- ABA DE INVENTÁRIO (PCP) ---
     with aba_inventario:
@@ -1061,6 +1106,9 @@ if st.session_state['perfil'] == "PCP":
                     for row_idx, col_alteradas in alteracoes.items():
                         db_id = int(df_estoque.loc[row_idx, "id"])
                         
+                        c.execute("SELECT categoria, tipo, nome, dimensoes, unidade FROM materiais WHERE id = %s", (db_id,))
+                        mat_info = c.fetchone()
+                        
                         if "Código" in col_alteradas:
                             novo_codigo = col_alteradas["Código"]
                             novo_codigo = str(novo_codigo).strip().upper() if novo_codigo else "-"
@@ -1068,11 +1116,14 @@ if st.session_state['perfil'] == "PCP":
                             
                         if "Valor / kg" in col_alteradas:
                             novo_valor = col_alteradas["Valor / kg"]
-                            if novo_valor:
-                                novo_valor = re.sub(r'[^0-9,]', '', str(novo_valor))
-                            else:
-                                novo_valor = "-"
+                            novo_valor = re.sub(r'[^0-9,]', '', str(novo_valor)) if novo_valor else "-"
                             c.execute("UPDATE materiais SET valor_kg = %s WHERE id = %s", (novo_valor, db_id))
+                            
+                        # Carimba a alteração no log
+                        c.execute('''
+                            INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ''', (obter_agora_br(), st.session_state['usuario_nome'], mat_info[0], mat_info[1], mat_info[2], mat_info[3], mat_info[4], 'EDIÇÃO', 0))
                             
                     conn.commit()
                     st.success("✅ Alterações salvas com sucesso no banco de dados!")
@@ -1093,16 +1144,28 @@ if st.session_state['perfil'] == "PCP":
             if item_excluir != "":
                 linha_del = df_estoque[df_estoque['identificador_exclusao'] == item_excluir]
                 id_del = int(linha_del['id'].values[0])
-                nome_del = f"{linha_del['Tipo'].values[0]} {linha_del['Dimensões'].values[0]}"
+                
+                c.execute("SELECT categoria, tipo, nome, dimensoes, unidade, saldo FROM materiais WHERE id = %s", (id_del,))
+                mat_info = c.fetchone()
+                nome_del = f"{mat_info[2]} {mat_info[3]}"
                 
                 if st.button(f"🚨 Confirmar Exclusão: {nome_del}", use_container_width=True):
+                    # Registra a exclusão imediatamente antes de apagar a linha
+                    c.execute('''
+                        INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (obter_agora_br(), st.session_state['usuario_nome'], mat_info[0], mat_info[1], mat_info[2], mat_info[3], mat_info[4], 'EXCLUSÃO', mat_info[5]))
+                    
                     c.execute("DELETE FROM materiais WHERE id = %s", (id_del,))
                     conn.commit()
                     st.success(f"✅ Material '{nome_del}' removido do catálogo com sucesso!")
                     st.rerun()
 
+        # Renderização do histórico no final da terceira aba
+        exibir_historico_operacoes()
+
 # ==========================================
-# SE FOR VENDEDOR: Visualização 100% Bloqueada (Apenas Leitura)
+# SE FOR VENDEDOR: Visualização de Leitura (Com Histórico Opcional)
 # ==========================================
 elif st.session_state['perfil'] == "VENDEDOR":
     st.subheader("📋 Inventário Atualizado em Tempo Real")
@@ -1127,3 +1190,5 @@ elif st.session_state['perfil'] == "VENDEDOR":
                 "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small")
             }
         )
+    # Exibe também para vendas monitorar as validações de saídas
+    exibir_historico_operacoes()
