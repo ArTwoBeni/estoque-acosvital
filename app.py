@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit st as st
 import pandas as pd
 import psycopg2
 import os
@@ -161,14 +161,50 @@ try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS valor_kg TEXT;")
+    
     c.execute("UPDATE materiais SET filial = '-' WHERE filial IS NULL")
     c.execute("UPDATE materiais SET valor_kg = '-' WHERE valor_kg IS NULL")
     
     c.execute("UPDATE materiais SET unidade = 'UNID/6', dimensoes = REPLACE(dimensoes, ' | UNID/6', '') WHERE dimensoes LIKE '% | UNID/6'")
     c.execute("UPDATE materiais SET unidade = 'UNID/12', dimensoes = REPLACE(dimensoes, ' | UNID/12', '') WHERE dimensoes LIKE '% | UNID/12'")
     c.execute("UPDATE materiais SET unidade = 'UNID' WHERE unidade IS NULL OR unidade = '-' OR unidade = ''")
+    
+    # Robô de Migração do Padrão Antigo para o Novo Padrão de Nomenclatura (Alma, SCH, Tubo-S)
+    c.execute("SELECT id, nome, dimensoes FROM materiais")
+    registros_antigos = c.fetchall()
+    
+    for row in registros_antigos:
+        db_id, n, d = row
+        update_needed = False
+        
+        match_alma = re.search(r'(\d+ª ALMA|ALMA \d+ª)', n)
+        if match_alma and not d.startswith(match_alma.group(1)):
+            n = n.replace(" " + match_alma.group(1), "")
+            d = f"{match_alma.group(1)} | {d}"
+            update_needed = True
+
+        match_sch = re.search(r'(SCH \d+)', n)
+        if match_sch and not d.startswith(match_sch.group(1)):
+            n = n.replace(" " + match_sch.group(1), "")
+            d = f"{match_sch.group(1)} | {d}"
+            update_needed = True
+
+        match_s = re.search(r'(\d+-S)', n)
+        if match_s and not d.startswith(match_s.group(1)):
+            n = n.replace(" " + match_s.group(1), "")
+            d = f"{match_s.group(1)} | {d}"
+            update_needed = True
+            
+        if " | SCH: " in d:
+            parts = d.split(" | SCH: ")
+            d = f"SCH {parts[1]} | {parts[0]}"
+            update_needed = True
+
+        if update_needed:
+            c.execute("UPDATE materiais SET nome = %s, dimensoes = %s WHERE id = %s", (n.strip(), d.strip(), db_id))
+            
     conn.commit()
-except:
+except Exception as e:
     pass
 
 # --- FUNÇÃO AUXILIAR: FUSO HORÁRIO DE BRASÍLIA ---
@@ -194,11 +230,9 @@ def exibir_historico_operacoes():
     else:
         df_logs = pd.DataFrame(logs, columns=["Data_Hora_Raw", "Quem fez a movimentação", "Categoria", "Tipo", "Dimensões", "UNID", "Entrada/Saida", "Quantidade"])
         
-        # Formatação de Data e Hora conforme especificação
         df_logs['Data da movimentação'] = pd.to_datetime(df_logs['Data_Hora_Raw']).dt.strftime('%d/%m/%Y')
         df_logs['Horas da movimentação'] = pd.to_datetime(df_logs['Data_Hora_Raw']).dt.strftime('%H:%M')
         
-        # Organização visual final das colunas
         df_final_logs = df_logs[[
             "Data da movimentação", "Horas da movimentação", "Quem fez a movimentação", 
             "Categoria", "Tipo", "Dimensões", "UNID", "Entrada/Saida", "Quantidade"
@@ -214,12 +248,13 @@ if st.session_state['perfil'] == "PCP":
     with aba_cadastro:
         st.subheader("➕ Cadastrar Novo Material")
 
+        # Inclusão de Barra Quadrada e Barra Sextavada no catálogo oficial
         categorias_catalogo = {
             "FLANGES": ["ANSI", "AWWA C-207", "PN"],
             "CONEXÕES": ["Curva", "Cruz (ASME B16.9 ou Inox MSS SP-43)", "Redução (ASME B16.9 ou Inox MSS SP-43)", "Pestana (ASME B16.9 ou Inox MSS SP-43)", "Niple de Redução (ASME B16.9 ou MSSP-95)", "Alta Pressão / Forjadas", "Colares", "Plugs / Buchas / Niples"],
             "TUBOS": ["Aço Inox", "Com Costura", "Aço Carbono", "Mecânicos Laminados", "Calandrados de Grandes Diâmetros", "Industriais"],
             "LINHA PEAD": ["Flange Solto PEAD", "Conexões de Eletrofusão", "Conexões Injetadas", "Colarinhos Usinados", "Curvas", "Tees Segmentadas", "Redução Usinada"],
-            "PERFIS LAMINADOS E DOBRADOS": ["(W) I", "(W) H - HP", "I - Abas Inclinadas", "U - Abas Inclinadas", "U - Simples", "U - Enrijecido", "Cantoneira - Abas Iguais", "Cantoneira - Abas Desiguais", "Barra Redonda", "Barra Chata"],
+            "PERFIS LAMINADOS E DOBRADOS": ["(W) I", "(W) H - HP", "I - Abas Inclinadas", "U - Abas Inclinadas", "U - Simples", "U - Enrijecido", "Cantoneira - Abas Iguais", "Cantoneira - Abas Desiguais", "Barra Redonda", "Barra Quadrada", "Barra Sextavada", "Barra Chata"],
             "CHAPAS E GRADES": ["Fina Frio", "Fina Quente", "Grossa", "Xadrez", "Zincada", "Perfurada - Furo Redondo", "Expandida", "Piso Soldadas", "Piso Entrelaçadas", "Degraus para Escadas"],
             "CONSTRUÇÃO CIVIL": ["Vergalhões CA - 25", "Vergalhões CA - 50", "Vergalhões CA - 60", "Arame Recozido", "Barra de Transferência", "Tela Soldada Nervurada", "Telha", "Treliça"]
         }
@@ -550,7 +585,7 @@ if st.session_state['perfil'] == "PCP":
                 dim1 = dim_nom.replace('"', '').strip()
                 prefixo_alma = f"{alma_final} | " if alma_final else ""
                 dimensoes_para_salvar = f'{prefixo_alma}{dim1}" | Esp: {espessura}mm'
-                unidade_para_salvar = size_wi = tamanho
+                unidade_para_salvar = tamanho
                 if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
 
             elif tipo == "(W) H - HP":
@@ -672,14 +707,15 @@ if st.session_state['perfil'] == "PCP":
                 unidade_para_salvar = tamanho
                 if not bit_h or not bit_b or not esp: campos_vazios = True
 
-            elif tipo == "Barra Redonda":
+            # Agrupamento inteligente de Barra Redonda, Barra Quadrada e Barra Sextavada
+            elif tipo in ["Barra Redonda", "Barra Quadrada", "Barra Sextavada"]:
                 col3, col4 = st.columns(2)
                 with col3:
-                    bitola = st.text_input("Bitola (Pol)", key="cad_bit_br")
+                    bitola = st.text_input("Bitola (Pol)", key=f"cad_bit_{tipo.replace(' ', '_').lower()}")
                 with col4:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_br")
+                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key=f"cad_tam_{tipo.replace(' ', '_').lower()}")
                     
-                nome = "Barra Redonda"
+                nome = tipo
                 dim1 = bitola.replace('"', '').strip()
                 dimensoes_para_salvar = f'Bitola: {dim1}"'
                 unidade_para_salvar = tamanho
@@ -716,6 +752,7 @@ if st.session_state['perfil'] == "PCP":
                 dimensoes_para_salvar = f"Bitola: {bitola}mm | {comp}m x {larg}m"
                 if not bitola or not comp or not larg: campos_vazios = True
 
+            # Correção oficial do erro "iand" para "in" para destravar o servidor
             elif tipo in ["Grossa", "Xadrez", "Zincada"]:
                 col3, col4, col5 = st.columns(3)
                 with col3:
@@ -920,7 +957,6 @@ if st.session_state['perfil'] == "PCP":
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, quantidade, filial_selecionada, valor_kg_limpo))
                     
-                    # Carimba a ação no Histórico
                     c.execute('''
                         INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -930,7 +966,6 @@ if st.session_state['perfil'] == "PCP":
                     st.success(f"✅ Material '{nome_limpo}' cadastrado com sucesso!")
                     st.rerun()
 
-        # Renderização do histórico no final da primeira aba
         exibir_historico_operacoes()
 
     with aba_movimentacao:
@@ -1055,9 +1090,8 @@ if st.session_state['perfil'] == "PCP":
                     else:
                         c.execute("UPDATE materiais SET saldo = %s WHERE id = %s", (novo_saldo, id_real))
                         
-                        # Grava a movimentação no histórico
                         c.execute('''
-                            INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
+                            INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantity)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''', (obter_agora_br(), st.session_state['usuario_nome'], linha_selecionada['categoria'].values[0], linha_selecionada['tipo'].values[0], linha_selecionada['nome'].values[0], linha_selecionada['dimensoes'].values[0], linha_selecionada['unidade'].values[0], op_log, quantidade))
                         
@@ -1067,7 +1101,6 @@ if st.session_state['perfil'] == "PCP":
             elif df_final.empty:
                 st.warning("⚠️ Nenhum material encontrado no estoque com esses filtros.")
 
-        # Renderização do histórico no final da segunda aba
         exibir_historico_operacoes()
 
     # --- ABA DE INVENTÁRIO (PCP) ---
@@ -1119,7 +1152,6 @@ if st.session_state['perfil'] == "PCP":
                             novo_valor = re.sub(r'[^0-9,]', '', str(novo_valor)) if novo_valor else "-"
                             c.execute("UPDATE materiais SET valor_kg = %s WHERE id = %s", (novo_valor, db_id))
                             
-                        # Carimba a alteração no log
                         c.execute('''
                             INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1150,7 +1182,6 @@ if st.session_state['perfil'] == "PCP":
                 nome_del = f"{mat_info[2]} {mat_info[3]}"
                 
                 if st.button(f"🚨 Confirmar Exclusão: {nome_del}", use_container_width=True):
-                    # Registra a exclusão imediatamente antes de apagar a linha
                     c.execute('''
                         INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1161,7 +1192,6 @@ if st.session_state['perfil'] == "PCP":
                     st.success(f"✅ Material '{nome_del}' removido do catálogo com sucesso!")
                     st.rerun()
 
-        # Renderização do histórico no final da terceira aba
         exibir_historico_operacoes()
 
 # ==========================================
@@ -1190,5 +1220,4 @@ elif st.session_state['perfil'] == "VENDEDOR":
                 "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small")
             }
         )
-    # Exibe também para vendas monitorar as validações de saídas
     exibir_historico_operacoes()
