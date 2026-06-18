@@ -716,7 +716,7 @@ if st.session_state['perfil'] == "PCP":
                 dimensoes_para_salvar = f"Bitola: {bitola}mm | {comp}m x {larg}m"
                 if not bitola or not comp or not larg: campos_vazios = True
 
-            elif tipo iand ["Grossa", "Xadrez", "Zincada"]:
+            elif tipo in ["Grossa", "Xadrez", "Zincada"]:
                 col3, col4, col5 = st.columns(3)
                 with col3:
                     esp = st.text_input("Espessura (Pol)", key=f"cad_esp_{tipo[:4]}")
