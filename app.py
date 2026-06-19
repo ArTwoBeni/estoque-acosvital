@@ -210,8 +210,8 @@ except Exception as e:
 
 # --- FUNÇÃO AUXILIAR: FUSO HORÁRIO DE BRASÍLIA ---
 def obter_agora_br():
-    tz_br = datetime.timezone(datetime.timedelta(hours=-3))
-    return datetime.datetime.now(tz_br)
+    # Pega o horário global e subtrai 3 horas na marra (Garante o fuso de Brasília/Uberaba)
+    return datetime.datetime.utcnow() - datetime.timedelta(hours=3)
 
 # --- FUNÇÃO AUXILIAR: EXIBIÇÃO DO HISTÓRICO NAS ABAS ---
 def exibir_historico_operacoes():
