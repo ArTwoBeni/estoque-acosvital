@@ -121,6 +121,7 @@ def init_connection():
     return psycopg2.connect(DATABASE_URL)
 
 conn = init_connection()
+conn.rollback()  # <-- ADICIONE ESTA LINHA AQUI! Ela destrava o banco automaticamente
 c = conn.cursor()
 
 # Criação da tabela base de materiais
@@ -1091,7 +1092,7 @@ if st.session_state['perfil'] == "PCP":
                         c.execute("UPDATE materiais SET saldo = %s WHERE id = %s", (novo_saldo, id_real))
                         
                         c.execute('''
-                            INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantity)
+                            INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''', (obter_agora_br(), st.session_state['usuario_nome'], linha_selecionada['categoria'].values[0], linha_selecionada['tipo'].values[0], linha_selecionada['nome'].values[0], linha_selecionada['dimensoes'].values[0], linha_selecionada['unidade'].values[0], op_log, quantidade))
                         
