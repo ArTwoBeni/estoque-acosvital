@@ -75,6 +75,7 @@ if not st.session_state['logged_in']:
             "denis.pcp": "Denis",
             "joao.pcp": "João V.",
             "jonathan.pcp": "Jonathan",
+            "rafael.stock": "Rafael S.",
             "vendas": "Vendas"
         }
 
