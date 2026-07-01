@@ -60,8 +60,8 @@ if not st.session_state['logged_in']:
 
         # --- DICIONÁRIO DE USUÁRIOS E SENHAS ---
         usuarios_pcp = {
-            "denis.pcp": "Davi&Heitor",
-            "joao.pcp": "46993062",
+            "denis.pcp": "Heitor2024",
+            "joao.pcp": "46993061",
             "jonathan.pcp": "120910"
         }
 
@@ -121,7 +121,7 @@ def init_connection():
     return psycopg2.connect(DATABASE_URL)
 
 conn = init_connection()
-conn.rollback()  # <-- ADICIONE ESTA LINHA AQUI! Ela destrava o banco automaticamente
+conn.rollback() # Chave Mestra anti-bloqueio
 c = conn.cursor()
 
 # Criação da tabela base de materiais
@@ -156,57 +156,6 @@ c.execute('''
     )
 ''')
 conn.commit()
-
-# Ajuste automático de colunas estruturais
-try:
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS valor_kg TEXT;")
-    
-    c.execute("UPDATE materiais SET filial = '-' WHERE filial IS NULL")
-    c.execute("UPDATE materiais SET valor_kg = '-' WHERE valor_kg IS NULL")
-    
-    c.execute("UPDATE materiais SET unidade = 'UNID/6', dimensoes = REPLACE(dimensoes, ' | UNID/6', '') WHERE dimensoes LIKE '% | UNID/6'")
-    c.execute("UPDATE materiais SET unidade = 'UNID/12', dimensoes = REPLACE(dimensoes, ' | UNID/12', '') WHERE dimensoes LIKE '% | UNID/12'")
-    c.execute("UPDATE materiais SET unidade = 'UNID' WHERE unidade IS NULL OR unidade = '-' OR unidade = ''")
-    
-    # Robô de Migração do Padrão Antigo para o Novo Padrão de Nomenclatura (Alma, SCH, Tubo-S)
-    c.execute("SELECT id, nome, dimensoes FROM materiais")
-    registros_antigos = c.fetchall()
-    
-    for row in registros_antigos:
-        db_id, n, d = row
-        update_needed = False
-        
-        match_alma = re.search(r'(\d+ª ALMA|ALMA \d+ª)', n)
-        if match_alma and not d.startswith(match_alma.group(1)):
-            n = n.replace(" " + match_alma.group(1), "")
-            d = f"{match_alma.group(1)} | {d}"
-            update_needed = True
-
-        match_sch = re.search(r'(SCH \d+)', n)
-        if match_sch and not d.startswith(match_sch.group(1)):
-            n = n.replace(" " + match_sch.group(1), "")
-            d = f"{match_sch.group(1)} | {d}"
-            update_needed = True
-
-        match_s = re.search(r'(\d+-S)', n)
-        if match_s and not d.startswith(match_s.group(1)):
-            n = n.replace(" " + match_s.group(1), "")
-            d = f"{match_s.group(1)} | {d}"
-            update_needed = True
-            
-        if " | SCH: " in d:
-            parts = d.split(" | SCH: ")
-            d = f"SCH {parts[1]} | {parts[0]}"
-            update_needed = True
-
-        if update_needed:
-            c.execute("UPDATE materiais SET nome = %s, dimensoes = %s WHERE id = %s", (n.strip(), d.strip(), db_id))
-            
-    conn.commit()
-except Exception as e:
-    pass
 
 # --- FUNÇÃO AUXILIAR: FUSO HORÁRIO DE BRASÍLIA ---
 def obter_agora_br():
@@ -249,7 +198,6 @@ if st.session_state['perfil'] == "PCP":
     with aba_cadastro:
         st.subheader("➕ Cadastrar Novo Material")
 
-        # Inclusão de Barra Quadrada e Barra Sextavada no catálogo oficial
         categorias_catalogo = {
             "FLANGES": ["ANSI", "AWWA C-207", "PN"],
             "CONEXÕES": ["Curva", "Cruz (ASME B16.9 ou Inox MSS SP-43)", "Redução (ASME B16.9 ou Inox MSS SP-43)", "Pestana (ASME B16.9 ou Inox MSS SP-43)", "Niple de Redução (ASME B16.9 ou MSSP-95)", "Alta Pressão / Forjadas", "Colares", "Plugs / Buchas / Niples"],
@@ -267,7 +215,24 @@ if st.session_state['perfil'] == "PCP":
             tipo = st.selectbox("Tipo", categorias_catalogo[categoria], key="cad_tipo_principal")
             
         st.markdown("<br>", unsafe_allow_html=True)
+        
+        # ==========================================
+        # VACINA 3: Espelho do Catálogo
+        # Mostra tudo que já existe para o operador não duplicar
+        # ==========================================
+        c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND tipo = %s ORDER BY nome, dimensoes", (categoria, tipo))
+        catalogo_existente = c.fetchall()
+        if catalogo_existente:
+            with st.expander(f"👀 Ver peças do tipo '{tipo}' já cadastradas (Evite duplicidade!)", expanded=True):
+                df_cat = pd.DataFrame(catalogo_existente, columns=["Código", "Nome", "Dimensões", "Filial"])
+                st.dataframe(df_cat, use_container_width=True, hide_index=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+
         col_cod, col_filial, col_valor = st.columns([1.5, 1, 1])
+        
+        codigo_em_uso = False # Trava mestre
+        
         with col_cod:
             codigo = st.text_input("Código do Material (Opcional)", key="cad_codigo")
             if codigo:
@@ -275,7 +240,9 @@ if st.session_state['perfil'] == "PCP":
                 c.execute("SELECT nome, dimensoes FROM materiais WHERE UPPER(codigo) = %s", (codigo_limpo,))
                 registro_existente = c.fetchone()
                 if registro_existente:
-                    st.warning(f"⚠️ Código já cadastrado em: {registro_existente[0]} ({registro_existente[1]})")
+                    # VACINA 1: Código Travado
+                    st.error(f"🚫 CÓDIGO EM USO: Já cadastrado em {registro_existente[0]} ({registro_existente[1]}).")
+                    codigo_em_uso = True
         with col_filial:
             filial_selecionada = st.selectbox("Aços Vital (Filial)", ["SP", "MG"], key="cad_filial")
         with col_valor:
@@ -708,7 +675,6 @@ if st.session_state['perfil'] == "PCP":
                 unidade_para_salvar = tamanho
                 if not bit_h or not bit_b or not esp: campos_vazios = True
 
-            # Agrupamento inteligente de Barra Redonda, Barra Quadrada e Barra Sextavada
             elif tipo in ["Barra Redonda", "Barra Quadrada", "Barra Sextavada"]:
                 col3, col4 = st.columns(2)
                 with col3:
@@ -753,7 +719,6 @@ if st.session_state['perfil'] == "PCP":
                 dimensoes_para_salvar = f"Bitola: {bitola}mm | {comp}m x {larg}m"
                 if not bitola or not comp or not larg: campos_vazios = True
 
-            # Correção oficial do erro "iand" para "in" para destravar o servidor
             elif tipo in ["Grossa", "Xadrez", "Zincada"]:
                 col3, col4, col5 = st.columns(3)
                 with col3:
@@ -944,14 +909,23 @@ if st.session_state['perfil'] == "PCP":
             
             if campos_vazios:
                 st.warning("⚠️ Por favor, preencha todos os campos obrigatórios da peça!")
+            elif codigo_em_uso:
+                st.error("❌ O código digitado já pertence a outro material. Apague ou altere o código para prosseguir.")
             else:
+                # ==========================================
+                # VACINA 2: Esmagador de Espaços
+                # Compara tudo grudado para bloquear falsas duplicatas
+                # ==========================================
+                dimensoes_sem_espaco = dimensoes_limpas.replace(" ", "")
+                
                 c.execute('''
                     SELECT id FROM materiais 
-                    WHERE categoria = %s AND tipo = %s AND nome = %s AND dimensoes = %s AND filial = %s
-                ''', (categoria, tipo, nome_limpo, dimensoes_limpas, filial_selecionada))
+                    WHERE categoria = %s AND tipo = %s AND nome = %s 
+                    AND REPLACE(dimensoes, ' ', '') = %s AND filial = %s
+                ''', (categoria, tipo, nome_limpo, dimensoes_sem_espaco, filial_selecionada))
                 
                 if c.fetchone():
-                    st.error(f"❌ Cadastro Bloqueado: O material '{nome_limpo}' com essas dimensões já existe na filial {filial_selecionada}!")
+                    st.error(f"❌ Cadastro Bloqueado (Segurança Ativada): O material '{nome_limpo}' com essas dimensões exatas já existe na filial {filial_selecionada} (mesmo se você digitou os espaços de outro jeito)!")
                 else:
                     c.execute('''
                         INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo, filial, valor_kg)
