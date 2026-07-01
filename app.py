@@ -62,7 +62,7 @@ if not st.session_state['logged_in']:
         usuarios_pcp = {
             "denis.pcp": "Davi&Heitor",
             "joao.pcp": "46993061",
-            "jonathan.pcp": "120910"
+            "jonathan.pcp": "120910" ,
             "rafael.stock": "recruta"
         }
 
