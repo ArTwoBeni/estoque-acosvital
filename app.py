@@ -118,12 +118,20 @@ st.markdown("---")
 
 DATABASE_URL = st.secrets["DATABASE_URL"]
 
-@st.cache_resource
+@st.cache_resource(ttl=600) # Pede para o site reciclar a conexão a cada 10 minutos
 def init_connection():
     return psycopg2.connect(DATABASE_URL)
 
 conn = init_connection()
-conn.rollback() # Chave Mestra anti-bloqueio
+
+# Sistema de auto-cura: Se o Supabase tiver derrubado a conexão, ele reconecta sozinho
+try:
+    conn.rollback() 
+except psycopg2.InterfaceError:
+    st.cache_resource.clear() # Limpa a memória velha
+    conn = init_connection()  # Abre uma conexão nova
+    conn.rollback()           # Roda a Chave Mestra
+    
 c = conn.cursor()
 
 # Criação da tabela base de materiais
