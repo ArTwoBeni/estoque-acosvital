@@ -63,7 +63,8 @@ if not st.session_state['logged_in']:
             "denis.pcp": "Davi&Heitor",
             "joao.pcp": "46993061",
             "jonathan.pcp": "120910" ,
-            "rafael.stock": "recruta"
+            "rafael.stock": "recruta" ,
+            "douglas.mogi": "drowssap"
         }
 
         usuarios_vendas = {
@@ -76,6 +77,7 @@ if not st.session_state['logged_in']:
             "joao.pcp": "João V.",
             "jonathan.pcp": "Jonathan",
             "rafael.stock": "Rafael S.",
+            "douglas.mogi": "Douglas (MOGI)",
             "vendas": "Vendas"
         }
 
