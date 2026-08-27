@@ -64,11 +64,13 @@ if not st.session_state['logged_in']:
             "joao.pcp": "46993061",
             "jonathan.pcp": "120910" ,
             "rafael.stock": "recruta" ,
-            "douglas.mogi": "drowssap"
+            "entrada.mogi": "adartnedrowssap",
+            "saida.mogi": "adiasdrowssap"
         }
 
         usuarios_vendas = {
-            "vendas": "AcosVital@2026"
+            "vendas": "AcosVital@2026",
+            "compras": "AV@2026"
         }
 
         # Mapeamento de nomes amigáveis para o Log de Auditoria
@@ -77,8 +79,10 @@ if not st.session_state['logged_in']:
             "joao.pcp": "João V.",
             "jonathan.pcp": "Jonathan",
             "rafael.stock": "Rafael S.",
-            "douglas.mogi": "Douglas (MOGI)",
-            "vendas": "Vendas"
+            "entrada.mogi": "Entrada (MOGI)",
+            "saida.mogi": "Saida (MOGI)",
+            "vendas": "Vendas",
+            "compras": "Compras"
         }
 
         if btn_login:
