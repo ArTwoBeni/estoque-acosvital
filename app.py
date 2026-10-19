@@ -154,7 +154,11 @@ c.execute('''
         unidade TEXT,
         saldo REAL,
         filial TEXT,
-        valor_kg TEXT
+        valor_kg TEXT,
+        origem TEXT,
+        st TEXT,
+        difal TEXT,
+        icms TEXT
     )
 ''')
 
@@ -175,10 +179,45 @@ c.execute('''
 ''')
 conn.commit()
 
+# Migração automática de novas colunas fiscais e de origem para itens antigos
+try:
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS valor_kg TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS origem TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS st TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS difal TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS icms TEXT;")
+    
+    c.execute("UPDATE materiais SET origem = '' WHERE origem IS NULL OR origem = '-'")
+    c.execute("UPDATE materiais SET st = '' WHERE st IS NULL OR st = '-'")
+    c.execute("UPDATE materiais SET difal = '' WHERE difal IS NULL OR difal = '-'")
+    c.execute("UPDATE materiais SET icms = '' WHERE icms IS NULL OR icms = '-'")
+    conn.commit()
+except:
+    conn.rollback()
+
 # --- FUNÇÃO AUXILIAR: FUSO HORÁRIO DE BRASÍLIA ---
 def obter_agora_br():
-    # Pega o horário global e subtrai 3 horas na marra (Garante o fuso de Brasília/Uberaba)
     return datetime.datetime.utcnow() - datetime.timedelta(hours=3)
+
+# --- FUNÇÃO AUXILIAR: FORMATADOR DE IDENTIFICADOR ---
+def montar_identificador(r):
+    cod_str = f"[{r['codigo']}] " if str(r['codigo']) not in ["-", "", "None"] else ""
+    val_str = f" | R$ {r['valor_kg']}/kg" if str(r['valor_kg']) not in ["-", "", "None"] else ""
+    
+    extras = []
+    if str(r.get('origem', '')) not in ["", "-", "None"]:
+        extras.append(f"Orig: {r['origem']}")
+    if str(r.get('st', '')) not in ["", "-", "None"]:
+        extras.append(f"ST: {r['st']}%")
+    if str(r.get('difal', '')) not in ["", "-", "None"]:
+        extras.append(f"DIFAL: {r['difal']}%")
+    if str(r.get('icms', '')) not in ["", "-", "None"]:
+        extras.append(f"ICMS: {r['icms']}%")
+        
+    fiscal_str = " | " + " / ".join(extras) if extras else ""
+    return f"{cod_str}{r['nome']} - {r['dimensoes']} | {r['filial']} | Saldo: {int(r['saldo'])} {r['unidade']}{val_str}{fiscal_str}"
 
 # --- FUNÇÃO AUXILIAR: EXIBIÇÃO DO HISTÓRICO NAS ABAS ---
 def exibir_historico_operacoes():
@@ -220,8 +259,9 @@ if st.session_state['perfil'] == "PCP":
             "FLANGES": ["ANSI", "AWWA C-207", "PN"],
             "CONEXÕES": ["Curva", "Cruz (ASME B16.9 ou Inox MSS SP-43)", "Redução (ASME B16.9 ou Inox MSS SP-43)", "Pestana (ASME B16.9 ou Inox MSS SP-43)", "Niple de Redução (ASME B16.9 ou MSSP-95)", "Alta Pressão / Forjadas", "Colares", "Plugs / Buchas / Niples"],
             "TUBOS": ["Aço Inox", "Com Costura", "Aço Carbono", "Mecânicos Laminados", "Calandrados de Grandes Diâmetros", "Industriais"],
+            "VÁLVULAS": ["Válvula Esfera", "Válvula Gaveta", "Válvula Borboleta", "Válvula Retenção Dupla Portinhola", "Válvula Globo", "Válvula Guilhotina"],
             "LINHA PEAD": ["Flange Solto PEAD", "Conexões de Eletrofusão", "Conexões Injetadas", "Colarinhos Usinados", "Curvas", "Tees Segmentadas", "Redução Usinada"],
-            "PERFIS LAMINADOS E DOBRADOS": ["(W) I", "(W) H - HP", "I - Abas Inclinadas", "U - Abas Inclinadas", "U - Simples", "U - Enrijecido", "Cantoneira", "Barra Redonda", "Barra Quadrada", "Barra Sextavada", "Barra Chata"],
+            "PERFIS LAMINADOS E DOBRADOS": ["Perfil (W) / I", "Perfil U", "Cantoneira", "Barra"],
             "CHAPAS E GRADES": ["Fina Frio", "Fina Quente", "Inox", "Grossa", "Xadrez", "Zincada", "Perfurada - Furo Redondo", "Expandida", "Piso Soldadas", "Piso Entrelaçadas", "Degraus para Escadas"],
             "CONSTRUÇÃO CIVIL": ["Vergalhões CA - 25", "Vergalhões CA - 50", "Vergalhões CA - 60", "Arame Recozido", "Barra de Transferência", "Tela Soldada Nervurada", "Telha", "Treliça"]
         }
@@ -235,24 +275,29 @@ if st.session_state['perfil'] == "PCP":
         st.markdown("<br>", unsafe_allow_html=True)
         
         # ==========================================
-        # VACINA 3: Espelho do Catálogo
-        # Mostra tudo que já existe para o operador não duplicar
+        # VACINA 3: Espelho do Catálogo Inteligente
         # ==========================================
         if tipo == "Cantoneira":
-            c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND tipo LIKE 'Cantoneira%%' ORDER BY nome, dimensoes", (categoria,))
+            c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND (tipo LIKE 'Cantoneira%%' OR nome LIKE 'CANTONEIRA%%') ORDER BY nome, dimensoes", (categoria,))
+        elif tipo == "Perfil (W) / I":
+            c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND (tipo IN ('Perfil (W) / I', '(W) I', '(W) H - HP', 'I - Abas Inclinadas') OR nome LIKE 'PERFIL (W)%%' OR nome LIKE 'PERFIL W%%' OR nome LIKE 'PERFIL HP%%' OR nome LIKE 'PERFIL I%%') ORDER BY nome, dimensoes", (categoria,))
+        elif tipo == "Perfil U":
+            c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND (tipo LIKE 'U -%%' OR tipo = 'Perfil U' OR nome LIKE 'PERFIL U%%') ORDER BY nome, dimensoes", (categoria,))
+        elif tipo == "Barra":
+            c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND (tipo LIKE 'Barra%%' OR nome LIKE 'BARRA%%') ORDER BY nome, dimensoes", (categoria,))
         else:
             c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND tipo = %s ORDER BY nome, dimensoes", (categoria, tipo))
             
         catalogo_existente = c.fetchall()
         if catalogo_existente:
-            with st.expander(f"👀 Ver peças do tipo '{tipo}' já cadastradas (Evite duplicidade!)", expanded=True):
-                df_cat = pd.DataFrame(catalogo_existente, columns=["Código", "Nome", "Dimensões", "Filial"])
+            with st.expander(f"👀 Ver peças do grupo '{tipo}' já cadastradas (Evite duplicidade!)", expanded=True):
+                df_cat = pd.DataFrame(catalogo_existente, columns=["Código", "Tipo / Nome", "Dimensões", "Filial"])
                 st.dataframe(df_cat, use_container_width=True, hide_index=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # --- CABEÇALHO GERAL DO MATERIAL E TRIBUTAÇÃO ---
         col_cod, col_filial, col_valor = st.columns([1.5, 1, 1])
-        
         codigo_em_uso = False # Trava mestre
         
         with col_cod:
@@ -262,13 +307,26 @@ if st.session_state['perfil'] == "PCP":
                 c.execute("SELECT nome, dimensoes FROM materiais WHERE UPPER(codigo) = %s", (codigo_limpo,))
                 registro_existente = c.fetchone()
                 if registro_existente:
-                    # VACINA 1: Código Travado
                     st.error(f"🚫 CÓDIGO EM USO: Já cadastrado em {registro_existente[0]} ({registro_existente[1]}).")
                     codigo_em_uso = True
         with col_filial:
             filial_selecionada = st.selectbox("Aços Vital (Filial)", ["SP", "MG"], key="cad_filial")
         with col_valor:
             valor_kg = st.text_input("Valor / kg (R$)", help="Ex: 15,50", key="cad_valor_kg")
+
+        st.markdown("**🌐 Origem e Tributação (Opcional - Preencha apenas se aplicável)**")
+        col_orig_sel, col_orig_pct, col_st, col_difal, col_icms = st.columns([1.2, 1, 1, 1, 1])
+        with col_orig_sel:
+            origem_tipo = st.selectbox("Origem", ["Não informar", "Nacional", "Importado"], key="cad_orig_tipo")
+        with col_orig_pct:
+            origem_pct = st.text_input("Alíq. Origem (%)", help="Ex: 4 ou 12 (Opcional)", key="cad_orig_pct")
+        with col_st:
+            st_val = st.text_input("ST (%)", help="Ex: 18 (Apenas números e vírgula)", key="cad_st")
+        with col_difal:
+            difal_val = st.text_input("DIFAL (%)", help="Ex: 6 (Apenas números e vírgula)", key="cad_difal")
+        with col_icms:
+            icms_val = st.text_input("ICMS (%)", help="Ex: 18 (Apenas números e vírgula)", key="cad_icms")
+
         st.markdown("<hr style='margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
                     
         nome = ""
@@ -525,6 +583,24 @@ if st.session_state['perfil'] == "PCP":
                 unidade_para_salvar = tamanho
                 if not dim_nom or not espessura: campos_vazios = True
 
+        # --- NOVA CATEGORIA: VÁLVULAS ---
+        elif categoria == "VÁLVULAS":
+            col3, col4, col5 = st.columns([1.2, 1, 2])
+            with col3:
+                mat_valvula = st.selectbox("Material do Corpo", ["Aço Carbono", "Inox", "PVC"], key="cad_mat_valv")
+            with col4:
+                bitola_valv = st.text_input("Bitola (Pol.)", key="cad_bit_valv")
+            with col5:
+                obs_valv = st.text_input("Observação Livre (Ex: 150 LBS, PN16 - Opcional)", key="cad_obs_valv")
+                
+            nome = f"{tipo} {mat_valvula}"
+            dim1 = bitola_valv.replace('"', '').strip()
+            dimensoes_para_salvar = f'Bitola: {dim1}"' if dim1 else ""
+            if obs_valv and obs_valv.strip():
+                dimensoes_para_salvar += f" | {obs_valv.strip()}"
+            unidade_para_salvar = "UNID"
+            if not bitola_valv: campos_vazios = True
+
         elif categoria == "LINHA PEAD":
             if tipo == "Flange Solto PEAD":
                 col3, col4 = st.columns(2)
@@ -555,114 +631,167 @@ if st.session_state['perfil'] == "PCP":
         elif categoria == "PERFIS LAMINADOS E DOBRADOS":
             tamanho_opcoes = ["UNID/6", "UNID/12"]
 
-            if tipo == "(W) I":
-                col3, col4, col5, col6 = st.columns(4)
-                with col3:
-                    alma_sel = st.selectbox("Alma", ["1ª Alma", "2ª Alma", "Outro"], key="cad_alma_wi")
-                    if alma_sel == "Outro":
-                        alma_custom = st.text_input("Nº da Alma", key="cad_alma_cust_wi")
-                        alma_final = f"{alma_custom}ª Alma" if alma_custom else ""
-                    else:
-                        alma_final = alma_sel
-                with col4:
-                    dim_nom = st.text_input("Dim. Nominal (Pol)", key="cad_dim_wi")
-                with col5:
-                    espessura = st.text_input("Espessura (mm)", key="cad_esp_wi")
-                with col6:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_wi")
+            # 1. GRUPO PERFIL (W) / I
+            if tipo == "Perfil (W) / I":
+                col_w1, col_w2 = st.columns(2)
+                with col_w1:
+                    subtipo_w = st.selectbox("Modelo do Perfil", ["Perfil (W) I", "Perfil (W) H - HP", "Perfil I - Abas Inclinadas"], key="cad_sub_w")
+                with col_w2:
+                    mat_w = st.selectbox("Material", ["Aço Carbono (Padrão)", "Inox"], key="cad_mat_w")
                     
-                nome = f"Perfil {tipo}"
-                dim1 = dim_nom.replace('"', '').strip()
-                prefixo_alma = f"{alma_final} | " if alma_final else ""
-                dimensoes_para_salvar = f'{prefixo_alma}{dim1}" | Esp: {espessura}mm'
-                unidade_para_salvar = tamanho
-                if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
+                sufixo_inox = " Inox" if mat_w == "Inox" else ""
 
-            elif tipo == "(W) H - HP":
-                col3, col4, col5, col6, col7 = st.columns(5)
-                with col3:
-                    modelo = st.selectbox("Modelo", ["W", "HP"], key="cad_mod_whp")
-                with col4:
-                    alma_sel = st.selectbox("Alma", ["1ª Alma", "2ª Alma", "Outro"], key="cad_alma_whp")
-                    if alma_sel == "Outro":
-                        alma_custom = st.text_input("Nº da Alma", key="cad_alma_cust_whp")
-                        alma_final = f"{alma_custom}ª Alma" if alma_custom else ""
-                    else:
-                        alma_final = alma_sel
-                with col5:
-                    dim_nom = st.text_input("Dim. Nominal (Pol)", key="cad_dim_whp")
-                with col6:
-                    espessura = st.text_input("Espessura (mm)", key="cad_esp_whp")
-                with col7:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_whp")
+                if subtipo_w == "Perfil (W) I":
+                    col3, col4 = st.columns(2)
+                    with col3:
+                        alma_sel = st.selectbox("Alma", ["1ª Alma", "2ª Alma", "Outro"], key="cad_alma_wi")
+                        if alma_sel == "Outro":
+                            alma_custom = st.text_input("Nº da Alma", key="cad_alma_cust_wi")
+                            alma_final = f"{alma_custom}ª Alma" if alma_custom else ""
+                        else:
+                            alma_final = alma_sel
+                    with col4:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_wi")
+                        
+                    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                    with col_m1:
+                        ext_val = st.text_input("Externo", key="cad_ext_wi")
+                    with col_m2:
+                        int_val = st.text_input("Interno", key="cad_int_wi")
+                    with col_m3:
+                        alt_val = st.text_input("Altura", key="cad_alt_wi")
+                    with col_m4:
+                        aba_val = st.text_input("Espessura da aba", key="cad_aba_wi")
+                        
+                    nome = f"Perfil (W) I{sufixo_inox}"
+                    prefixo_alma = f"{alma_final} | " if alma_final else ""
+                    dimensoes_para_salvar = f"{prefixo_alma}Ext: {ext_val} | Int: {int_val} | Alt: {alt_val} | Aba: {aba_val}"
+                    unidade_para_salvar = tamanho
+                    if not ext_val or not int_val or not alt_val or not aba_val or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
+
+                elif subtipo_w == "Perfil (W) H - HP":
+                    col3, col4, col5 = st.columns(3)
+                    with col3:
+                        modelo = st.selectbox("Especificação (W / HP)", ["W", "HP"], key="cad_mod_whp")
+                    with col4:
+                        alma_sel = st.selectbox("Alma", ["1ª Alma", "2ª Alma", "Outro"], key="cad_alma_whp")
+                        if alma_sel == "Outro":
+                            alma_custom = st.text_input("Nº da Alma", key="cad_alma_cust_whp")
+                            alma_final = f"{alma_custom}ª Alma" if alma_custom else ""
+                        else:
+                            alma_final = alma_sel
+                    with col5:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_whp")
+                        
+                    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                    with col_m1:
+                        ext_val = st.text_input("Externo", key="cad_ext_whp")
+                    with col_m2:
+                        int_val = st.text_input("Interno", key="cad_int_whp")
+                    with col_m3:
+                        alt_val = st.text_input("Altura", key="cad_alt_whp")
+                    with col_m4:
+                        aba_val = st.text_input("Espessura da aba", key="cad_aba_whp")
+                        
+                    nome = f"Perfil {modelo}{sufixo_inox}"
+                    prefixo_alma = f"{alma_final} | " if alma_final else ""
+                    dimensoes_para_salvar = f"{prefixo_alma}Ext: {ext_val} | Int: {int_val} | Alt: {alt_val} | Aba: {aba_val}"
+                    unidade_para_salvar = tamanho
+                    if not ext_val or not int_val or not alt_val or not aba_val or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
+
+                elif subtipo_w == "Perfil I - Abas Inclinadas":
+                    col3, col4, col5, col6 = st.columns(4)
+                    with col3:
+                        modelo_sel = st.selectbox("Alma", ["Alma 1ª", "Alma 2ª", "Outro"], key="cad_mod_i_inc")
+                        if modelo_sel == "Outro":
+                            modelo_custom = st.text_input("Nº da Alma", key="cad_mod_cust_i_inc")
+                            modelo = f"Alma {modelo_custom}ª" if modelo_custom else ""
+                        else:
+                            modelo = modelo_sel
+                    with col4:
+                        bit_h = st.text_input("Bitola h (Pol)", key="cad_h_i_inc")
+                    with col5:
+                        bit_b = st.text_input("Bitola b (Pol)", key="cad_b_i_inc")
+                    with col6:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_i_inc")
+                        
+                    nome = f"Perfil I Abas Inclinadas{sufixo_inox}"
+                    dim_h = bit_h.replace('"', '').strip()
+                    dim_b = bit_b.replace('"', '').strip()
+                    prefixo_modelo = f"{modelo} | " if modelo else ""
+                    dimensoes_para_salvar = f'{prefixo_modelo}h: {dim_h}" x b: {dim_b}"'
+                    unidade_para_salvar = tamanho
+                    if not bit_h or not bit_b or (modelo_sel == "Outro" and not modelo_custom): campos_vazios = True
+
+            # 2. GRUPO PERFIL U
+            elif tipo == "Perfil U":
+                col_u1, col_u2 = st.columns(2)
+                with col_u1:
+                    subtipo_u = st.selectbox("Modelo do Perfil U", ["U - Abas Inclinadas", "U - Simples", "U - Enrijecido"], key="cad_sub_u")
+                with col_u2:
+                    mat_u = st.selectbox("Material", ["Aço Carbono (Padrão)", "Inox"], key="cad_mat_u")
                     
-                nome = f"Perfil {modelo}"
-                dim1 = dim_nom.replace('"', '').strip()
-                prefixo_alma = f"{alma_final} | " if alma_final else ""
-                dimensoes_para_salvar = f'{prefixo_alma}{dim1}" | Esp: {espessura}mm'
-                unidade_para_salvar = tamanho
-                if not dim_nom or not espessura or (alma_sel == "Outro" and not alma_custom): campos_vazios = True
+                sufixo_inox = " Inox" if mat_u == "Inox" else ""
 
-            elif tipo in ["I - Abas Inclinadas", "U - Abas Inclinadas"]:
-                col3, col4, col5, col6 = st.columns(4)
-                with col3:
-                    modelo_sel = st.selectbox("Modelo", ["Alma 1ª", "Alma 2ª", "Outro"], key=f"cad_mod_{tipo[:1]}")
-                    if modelo_sel == "Outro":
-                        modelo_custom = st.text_input("Nº da Alma", key=f"cad_mod_cust_{tipo[:1]}")
-                        modelo = f"Alma {modelo_custom}ª" if modelo_custom else ""
-                    else:
-                        modelo = modelo_sel
-                with col4:
-                    bit_h = st.text_input("Bitola h (Pol)", key=f"cad_h_{tipo[:1]}")
-                with col5:
-                    bit_b = st.text_input("Bitola b (Pol)", key=f"cad_b_{tipo[:1]}")
-                with col6:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key=f"cad_tam_{tipo[:1]}")
-                    
-                nome_base = "Perfil I" if "I -" in tipo else "Perfil U"
-                nome = f"{nome_base} Abas Inclinadas"
-                dim_h = bit_h.replace('"', '').strip()
-                dim_b = bit_b.replace('"', '').strip()
-                prefixo_modelo = f"{modelo} | " if modelo else ""
-                dimensoes_para_salvar = f'{prefixo_modelo}h: {dim_h}" x b: {dim_b}"'
-                unidade_para_salvar = tamanho
-                if not bit_h or not bit_b or (modelo_sel == "Outro" and not modelo_custom): campos_vazios = True
+                if subtipo_u == "U - Abas Inclinadas":
+                    col3, col4, col5, col6 = st.columns(4)
+                    with col3:
+                        modelo_sel = st.selectbox("Alma", ["Alma 1ª", "Alma 2ª", "Outro"], key="cad_mod_u_inc")
+                        if modelo_sel == "Outro":
+                            modelo_custom = st.text_input("Nº da Alma", key="cad_mod_cust_u_inc")
+                            modelo = f"Alma {modelo_custom}ª" if modelo_custom else ""
+                        else:
+                            modelo = modelo_sel
+                    with col4:
+                        bit_h = st.text_input("Bitola h (Pol)", key="cad_h_u_inc")
+                    with col5:
+                        bit_b = st.text_input("Bitola b (Pol)", key="cad_b_u_inc")
+                    with col6:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_u_inc")
+                        
+                    nome = f"Perfil U Abas Inclinadas{sufixo_inox}"
+                    dim_h = bit_h.replace('"', '').strip()
+                    dim_b = bit_b.replace('"', '').strip()
+                    prefixo_modelo = f"{modelo} | " if modelo else ""
+                    dimensoes_para_salvar = f'{prefixo_modelo}h: {dim_h}" x b: {dim_b}"'
+                    unidade_para_salvar = tamanho
+                    if not bit_h or not bit_b or (modelo_sel == "Outro" and not modelo_custom): campos_vazios = True
 
-            elif tipo == "U - Simples":
-                col3, col4, col5, col6 = st.columns(4)
-                with col3:
-                    bit_h = st.text_input("Bitola h (mm)", key="cad_h_us")
-                with col4:
-                    bit_b = st.text_input("Bitola b (mm)", key="cad_b_us")
-                with col5:
-                    esp = st.text_input("Espessura (mm)", key="cad_esp_us")
-                with col6:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_us")
-                    
-                nome = "Perfil U Simples"
-                dimensoes_para_salvar = f"h: {bit_h}mm x b: {bit_b}mm | Esp: {esp}mm"
-                unidade_para_salvar = tamanho
-                if not bit_h or not bit_b or not esp: campos_vazios = True
+                elif subtipo_u == "U - Simples":
+                    col3, col4, col5, col6 = st.columns(4)
+                    with col3:
+                        bit_h = st.text_input("Bitola h (mm)", key="cad_h_us")
+                    with col4:
+                        bit_b = st.text_input("Bitola b (mm)", key="cad_b_us")
+                    with col5:
+                        esp = st.text_input("Espessura (mm)", key="cad_esp_us")
+                    with col6:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_us")
+                        
+                    nome = f"Perfil U Simples{sufixo_inox}"
+                    dimensoes_para_salvar = f"h: {bit_h}mm x b: {bit_b}mm | Esp: {esp}mm"
+                    unidade_para_salvar = tamanho
+                    if not bit_h or not bit_b or not esp: campos_vazios = True
 
-            elif tipo == "U - Enrijecido":
-                col3, col4, col5, col6, col7 = st.columns(5)
-                with col3:
-                    bit_h = st.text_input("Bitola h (mm)", key="cad_h_ue")
-                with col4:
-                    bit_b = st.text_input("Bitola b (mm)", key="cad_b_ue")
-                with col5:
-                    aba = st.text_input("Aba (mm)", key="cad_aba_ue")
-                with col6:
-                    esp = st.text_input("Esp. (mm)", key="cad_esp_ue")
-                with col7:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_ue")
-                    
-                nome = "Perfil U Enrijecido"
-                dimensoes_para_salvar = f"h: {bit_h} x b: {bit_b} x Aba: {aba} | Esp: {esp}mm"
-                unidade_para_salvar = tamanho
-                if not bit_h or not bit_b or not aba or not esp: campos_vazios = True
+                elif subtipo_u == "U - Enrijecido":
+                    col3, col4, col5, col6, col7 = st.columns(5)
+                    with col3:
+                        bit_h = st.text_input("Bitola h (mm)", key="cad_h_ue")
+                    with col4:
+                        bit_b = st.text_input("Bitola b (mm)", key="cad_b_ue")
+                    with col5:
+                        aba = st.text_input("Aba (mm)", key="cad_aba_ue")
+                    with col6:
+                        esp = st.text_input("Esp. (mm)", key="cad_esp_ue")
+                    with col7:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_ue")
+                        
+                    nome = f"Perfil U Enrijecido{sufixo_inox}"
+                    dimensoes_para_salvar = f"h: {bit_h} x b: {bit_b} x Aba: {aba} | Esp: {esp}mm"
+                    unidade_para_salvar = tamanho
+                    if not bit_h or not bit_b or not aba or not esp: campos_vazios = True
 
-            # Unificação inteligente de Cantoneira (Abas Iguais / Desiguais + Opção Inox)
+            # 3. GRUPO CANTONEIRA
             elif tipo in ["Cantoneira", "Cantoneira - Abas Iguais", "Cantoneira - Abas Desiguais"]:
                 col_c1, col_c2 = st.columns(2)
                 with col_c1:
@@ -707,39 +836,48 @@ if st.session_state['perfil'] == "PCP":
                     unidade_para_salvar = tamanho
                     if not bit_h or not bit_b or not esp: campos_vazios = True
 
-            elif tipo in ["Barra Redonda", "Barra Quadrada", "Barra Sextavada"]:
-                col3, col4 = st.columns(2)
-                with col3:
-                    bitola = st.text_input("Bitola (Pol)", key=f"cad_bit_{tipo.replace(' ', '_').lower()}")
-                with col4:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key=f"cad_tam_{tipo.replace(' ', '_').lower()}")
+            # 4. GRUPO BARRA
+            elif tipo == "Barra":
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    subtipo_barra = st.selectbox("Formato da Barra", ["Barra Redonda", "Barra Quadrada", "Barra Sextavada", "Barra Chata"], key="cad_sub_barra")
+                with col_b2:
+                    mat_barra = st.selectbox("Material", ["Aço Carbono (Padrão)", "Inox"], key="cad_mat_barra")
                     
-                nome = tipo
-                dim1 = bitola.replace('"', '').strip()
-                dimensoes_para_salvar = f'Bitola: {dim1}"'
-                unidade_para_salvar = tamanho
-                if not bitola: campos_vazios = True
+                sufixo_inox = " Inox" if mat_barra == "Inox" else ""
 
-            elif tipo == "Barra Chata":
-                col3, col4, col5 = st.columns(3)
-                with col3:
-                    larg = st.text_input("Largura (Pol)", key="cad_larg_bc")
-                with col4:
-                    esp = st.text_input("Espessura (Pol)", key="cad_esp_bc")
-                with col5:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_bc")
-                    
-                nome = "Barra Chata"
-                dim1 = larg.replace('"', '').strip()
-                dim2 = esp.replace('"', '').strip()
-                dimensoes_para_salvar = f'Larg: {dim1}" | Esp: {dim2}"'
-                unidade_para_salvar = tamanho
-                if not larg or not esp: campos_vazios = True
+                if subtipo_barra in ["Barra Redonda", "Barra Quadrada", "Barra Sextavada"]:
+                    col3, col4 = st.columns(2)
+                    with col3:
+                        bitola = st.text_input("Bitola (Pol)", key=f"cad_bit_{subtipo_barra.replace(' ', '_').lower()}")
+                    with col4:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key=f"cad_tam_{subtipo_barra.replace(' ', '_').lower()}")
+                        
+                    nome = f"{subtipo_barra}{sufixo_inox}"
+                    dim1 = bitola.replace('"', '').strip()
+                    dimensoes_para_salvar = f'Bitola: {dim1}"'
+                    unidade_para_salvar = tamanho
+                    if not bitola: campos_vazios = True
+
+                elif subtipo_barra == "Barra Chata":
+                    col3, col4, col5 = st.columns(3)
+                    with col3:
+                        larg = st.text_input("Largura (Pol)", key="cad_larg_bc")
+                    with col4:
+                        esp = st.text_input("Espessura (Pol)", key="cad_esp_bc")
+                    with col5:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_bc")
+                        
+                    nome = f"Barra Chata{sufixo_inox}"
+                    dim1 = larg.replace('"', '').strip()
+                    dim2 = esp.replace('"', '').strip()
+                    dimensoes_para_salvar = f'Larg: {dim1}" | Esp: {dim2}"'
+                    unidade_para_salvar = tamanho
+                    if not larg or not esp: campos_vazios = True
 
         elif categoria == "CHAPAS E GRADES":
             nome = f"Chapa {tipo}" if "Piso" not in tipo and "Degraus" not in tipo else f"Grade {tipo}"
             
-            # Inclusão de "Inox" no Padrão A e mudança de Comprimento/Largura para (mm)
             if tipo in ["Fina Frio", "Fina Quente", "Inox"]:
                 col3, col4, col5 = st.columns(3)
                 with col3:
@@ -939,16 +1077,23 @@ if st.session_state['perfil'] == "PCP":
             valor_kg_limpo = re.sub(r'[^0-9,]', '', valor_kg) if valor_kg else "-"
             if not valor_kg_limpo: 
                 valor_kg_limpo = "-"
+                
+            # Tratamento da Origem e Tributação (salva vazio "" se não preenchido)
+            orig_pct_limpo = re.sub(r'[^0-9,]', '', origem_pct) if origem_pct else ""
+            if origem_tipo == "Não informar":
+                origem_final = ""
+            else:
+                origem_final = f"{origem_tipo.upper()} ({orig_pct_limpo}%)" if orig_pct_limpo else origem_tipo.upper()
+                
+            st_limpo = re.sub(r'[^0-9,]', '', st_val) if st_val else ""
+            difal_limpo = re.sub(r'[^0-9,]', '', difal_val) if difal_val else ""
+            icms_limpo = re.sub(r'[^0-9,]', '', icms_val) if icms_val else ""
             
             if campos_vazios:
                 st.warning("⚠️ Por favor, preencha todos os campos obrigatórios da peça!")
             elif codigo_em_uso:
                 st.error("❌ O código digitado já pertence a outro material. Apague ou altere o código para prosseguir.")
             else:
-                # ==========================================
-                # VACINA 2: Esmagador de Espaços
-                # Compara tudo grudado para bloquear falsas duplicatas
-                # ==========================================
                 dimensoes_sem_espaco = dimensoes_limpas.replace(" ", "")
                 
                 c.execute('''
@@ -958,12 +1103,12 @@ if st.session_state['perfil'] == "PCP":
                 ''', (categoria, nome_limpo, dimensoes_sem_espaco, filial_selecionada))
                 
                 if c.fetchone():
-                    st.error(f"❌ Cadastro Bloqueado (Segurança Ativada): O material '{nome_limpo}' com essas dimensões exatas já existe na filial {filial_selecionada} (mesmo se você digitou os espaços de outro jeito)!")
+                    st.error(f"❌ Cadastro Bloqueado (Segurança Ativada): O material '{nome_limpo}' com essas dimensões exatas já existe na filial {filial_selecionada}!")
                 else:
                     c.execute('''
-                        INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo, filial, valor_kg)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, quantidade, filial_selecionada, valor_kg_limpo))
+                        INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo, filial, valor_kg, origem, st, difal, icms)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, quantidade, filial_selecionada, valor_kg_limpo, origem_final, st_limpo, difal_limpo, icms_limpo))
                     
                     c.execute('''
                         INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
@@ -979,15 +1124,13 @@ if st.session_state['perfil'] == "PCP":
     with aba_movimentacao:
         st.subheader("🔄 Movimentação de Estoque")
 
-        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo, unidade, filial, valor_kg FROM materiais")
-        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "codigo", "categoria", "tipo", "nome", "dimensoes", "saldo", "unidade", "filial", "valor_kg"])
+        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo, unidade, filial, valor_kg, origem, st, difal, icms FROM materiais")
+        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "codigo", "categoria", "tipo", "nome", "dimensoes", "saldo", "unidade", "filial", "valor_kg", "origem", "st", "difal", "icms"])
 
         if df_materiais.empty:
             st.info("💡 Cadastre pelo menos um material no formulário acima para poder realizar movimentações.")
         else:
-            df_materiais['identificador'] = df_materiais.apply(
-                lambda r: f"[{r['codigo']}] {r['nome']} - {r['dimensoes']} | {r['filial']} | Saldo: {int(r['saldo'])} {r['unidade']} | R$ {r['valor_kg']}/kg" if str(r['codigo']) != "-" else f"{r['nome']} - {r['dimensoes']} | {r['filial']} | Saldo: {int(r['saldo'])} {r['unidade']} | R$ {r['valor_kg']}/kg", axis=1
-            )
+            df_materiais['identificador'] = df_materiais.apply(montar_identificador, axis=1)
 
             st.markdown("**1. Localize o Material**")
             modo_busca = st.radio(
@@ -1013,7 +1156,7 @@ if st.session_state['perfil'] == "PCP":
                 with col_m2:
                     df_filtrado_cat = df_materiais[df_materiais['categoria'] == filtro_cat]
                     tipos_existentes = df_filtrado_cat['tipo'].unique()
-                    filtro_tipo = st.selectbox("Tipo:", tipos_existentes, key="mov_tipo")
+                    filtro_tipo = st.selectbox("Grupo / Tipo:", tipos_existentes, key="mov_tipo")
 
                 df_filtrado_tipo = df_filtrado_cat[df_filtrado_cat['tipo'] == filtro_tipo].copy()
 
@@ -1114,14 +1257,16 @@ if st.session_state['perfil'] == "PCP":
     # --- ABA DE INVENTÁRIO (PCP) ---
     with aba_inventario:
         st.subheader("📋 Planilha de Inventário Dinâmica")
-        st.info("💡 Você pode editar as colunas **Código** e **Valor / kg** clicando duas vezes nelas. Depois, clique em Salvar.")
+        st.info("💡 **Edição Rápida PCP:** Dê um duplo-clique nas células de **Código**, **Dimensões** (útil para atualizar os Perfis W antigos!), **Valor / kg**, **Origem**, **ST (%)**, **DIFAL (%)** ou **ICMS (%)** para editar, e depois clique no botão de Salvar abaixo.")
         
-        c.execute("SELECT id, codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg FROM materiais ORDER BY nome")
-        df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg"])
+        c.execute("SELECT id, codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg, origem, st, difal, icms FROM materiais ORDER BY nome")
+        df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg", "Origem", "ST (%)", "DIFAL (%)", "ICMS (%)"])
         
         if df_estoque.empty:
             st.info("O estoque está vazio.")
         else:
+            df_estoque.fillna("", inplace=True)
+            
             edited_df = st.data_editor(
                 df_estoque,
                 hide_index=True,
@@ -1135,13 +1280,17 @@ if st.session_state['perfil'] == "PCP":
                     "Dimensões": st.column_config.TextColumn("Dimensões", width="large"),
                     "UNID": st.column_config.TextColumn("UNID", width="small"),
                     "Saldo": st.column_config.NumberColumn("Saldo", width="small"),
-                    "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small")
+                    "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small"),
+                    "Origem": st.column_config.TextColumn("Origem", width="medium", help="Ex: NACIONAL, IMPORTADO (4%)"),
+                    "ST (%)": st.column_config.TextColumn("ST (%)", width="small"),
+                    "DIFAL (%)": st.column_config.TextColumn("DIFAL (%)", width="small"),
+                    "ICMS (%)": st.column_config.TextColumn("ICMS (%)", width="small")
                 },
-                disabled=["Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo"],
+                disabled=["Aços Vital", "Categoria", "Tipo", "UNID", "Saldo"],
                 key="editor_inventario"
             )
             
-            if st.button("💾 Salvar Alterações de Código e Valor", type="primary", use_container_width=True):
+            if st.button("💾 Salvar Alterações na Planilha", type="primary", use_container_width=True):
                 alteracoes = st.session_state["editor_inventario"]["edited_rows"]
                 if alteracoes:
                     for row_idx, col_alteradas in alteracoes.items():
@@ -1154,11 +1303,36 @@ if st.session_state['perfil'] == "PCP":
                             novo_codigo = col_alteradas["Código"]
                             novo_codigo = str(novo_codigo).strip().upper() if novo_codigo else "-"
                             c.execute("UPDATE materiais SET codigo = %s WHERE id = %s", (novo_codigo, db_id))
+
+                        if "Dimensões" in col_alteradas:
+                            nova_dim = col_alteradas["Dimensões"]
+                            nova_dim = str(nova_dim).strip().upper() if nova_dim else "-"
+                            c.execute("UPDATE materiais SET dimensoes = %s WHERE id = %s", (nova_dim, db_id))
                             
                         if "Valor / kg" in col_alteradas:
                             novo_valor = col_alteradas["Valor / kg"]
                             novo_valor = re.sub(r'[^0-9,]', '', str(novo_valor)) if novo_valor else "-"
                             c.execute("UPDATE materiais SET valor_kg = %s WHERE id = %s", (novo_valor, db_id))
+
+                        if "Origem" in col_alteradas:
+                            nova_orig = col_alteradas["Origem"]
+                            nova_orig = str(nova_orig).strip().upper() if nova_orig else ""
+                            c.execute("UPDATE materiais SET origem = %s WHERE id = %s", (nova_orig, db_id))
+
+                        if "ST (%)" in col_alteradas:
+                            novo_st = col_alteradas["ST (%)"]
+                            novo_st = re.sub(r'[^0-9,]', '', str(novo_st)) if novo_st else ""
+                            c.execute("UPDATE materiais SET st = %s WHERE id = %s", (novo_st, db_id))
+
+                        if "DIFAL (%)" in col_alteradas:
+                            novo_difal = col_alteradas["DIFAL (%)"]
+                            novo_difal = re.sub(r'[^0-9,]', '', str(novo_difal)) if novo_difal else ""
+                            c.execute("UPDATE materiais SET difal = %s WHERE id = %s", (novo_difal, db_id))
+
+                        if "ICMS (%)" in col_alteradas:
+                            novo_icms = col_alteradas["ICMS (%)"]
+                            novo_icms = re.sub(r'[^0-9,]', '', str(novo_icms)) if novo_icms else ""
+                            c.execute("UPDATE materiais SET icms = %s WHERE id = %s", (novo_icms, db_id))
                             
                         c.execute('''
                             INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
@@ -1203,29 +1377,38 @@ if st.session_state['perfil'] == "PCP":
         exibir_historico_operacoes()
 
 # ==========================================
-# SE FOR VENDEDOR: Visualização de Leitura (Com Histórico Opcional)
+# SE FOR VENDEDOR / COMPRAS: Visualização de Leitura Inteligente
 # ==========================================
 elif st.session_state['perfil'] == "VENDEDOR":
     st.subheader("📋 Inventário Atualizado em Tempo Real")
-    c.execute("SELECT codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg FROM materiais ORDER BY nome")
-    df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg"])
+    c.execute("SELECT codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg, origem, st, difal, icms FROM materiais ORDER BY nome")
+    df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg", "Origem", "ST (%)", "DIFAL (%)", "ICMS (%)"])
     
     if df_estoque.empty:
         st.info("O estoque está vazio no momento.")
     else:
+        df_estoque.fillna("", inplace=True)
+        
+        # Oculta automaticamente as colunas fiscais na visão de vendas se nenhuma peça tiver valor preenchido nelas
+        config_vendedor = {
+            "Código": st.column_config.TextColumn("Código", width="small"),
+            "Aços Vital": st.column_config.TextColumn("Aços Vital", width="small"),
+            "Categoria": st.column_config.TextColumn("Categoria", width="medium"),
+            "Tipo": st.column_config.TextColumn("Tipo", width="large"),
+            "Dimensões": st.column_config.TextColumn("Dimensões", width="large"),
+            "UNID": st.column_config.TextColumn("UNID", width="small"),
+            "Saldo": st.column_config.NumberColumn("Saldo", width="small"),
+            "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small"),
+            "Origem": st.column_config.TextColumn("Origem", width="medium") if df_estoque["Origem"].str.strip().replace("-", "").any() else None,
+            "ST (%)": st.column_config.TextColumn("ST (%)", width="small") if df_estoque["ST (%)"].str.strip().replace("-", "").any() else None,
+            "DIFAL (%)": st.column_config.TextColumn("DIFAL (%)", width="small") if df_estoque["DIFAL (%)"].str.strip().replace("-", "").any() else None,
+            "ICMS (%)": st.column_config.TextColumn("ICMS (%)", width="small") if df_estoque["ICMS (%)"].str.strip().replace("-", "").any() else None,
+        }
+        
         st.dataframe(
             df_estoque, 
             use_container_width=True, 
             hide_index=True,
-            column_config={
-                "Código": st.column_config.TextColumn("Código", width="small"),
-                "Aços Vital": st.column_config.TextColumn("Aços Vital", width="small"),
-                "Categoria": st.column_config.TextColumn("Categoria", width="medium"),
-                "Tipo": st.column_config.TextColumn("Tipo", width="large"),
-                "Dimensões": st.column_config.TextColumn("Dimensões", width="large"),
-                "UNID": st.column_config.TextColumn("UNID", width="small"),
-                "Saldo": st.column_config.NumberColumn("Saldo", width="small"),
-                "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small")
-            }
+            column_config=config_vendedor
         )
     exibir_historico_operacoes()
