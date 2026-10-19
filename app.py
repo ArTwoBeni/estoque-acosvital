@@ -126,19 +126,18 @@ st.markdown("---")
 
 DATABASE_URL = st.secrets["DATABASE_URL"]
 
-@st.cache_resource(ttl=600) # Pede para o site reciclar a conexão a cada 10 minutos
+@st.cache_resource(ttl=600)
 def init_connection():
     return psycopg2.connect(DATABASE_URL)
 
 conn = init_connection()
 
-# Sistema de auto-cura: Se o Supabase tiver derrubado a conexão, ele reconecta sozinho
 try:
     conn.rollback() 
 except psycopg2.InterfaceError:
-    st.cache_resource.clear() # Limpa a memória velha
-    conn = init_connection()  # Abre uma conexão nova
-    conn.rollback()           # Roda a Chave Mestra
+    st.cache_resource.clear()
+    conn = init_connection()
+    conn.rollback()
     
 c = conn.cursor()
 
@@ -156,9 +155,7 @@ c.execute('''
         filial TEXT,
         valor_kg TEXT,
         origem TEXT,
-        st TEXT,
-        difal TEXT,
-        icms TEXT
+        tributacao TEXT
     )
 ''')
 
@@ -179,7 +176,7 @@ c.execute('''
 ''')
 conn.commit()
 
-# Migração automática de novas colunas fiscais e de origem para itens antigos
+# Migração automática de colunas fiscais e unificação inteligente de ST | DIFAL | ICMS
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
@@ -188,11 +185,24 @@ try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS st TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS difal TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS icms TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS tributacao TEXT;")
     
     c.execute("UPDATE materiais SET origem = '' WHERE origem IS NULL OR origem = '-'")
-    c.execute("UPDATE materiais SET st = '' WHERE st IS NULL OR st = '-'")
-    c.execute("UPDATE materiais SET difal = '' WHERE difal IS NULL OR difal = '-'")
-    c.execute("UPDATE materiais SET icms = '' WHERE icms IS NULL OR icms = '-'")
+    c.execute("UPDATE materiais SET tributacao = '' WHERE tributacao IS NULL OR tributacao = '-'")
+    
+    # Se havia algum dado salvo nas colunas separadas st/difal/icms, junta tudo em 'tributacao'
+    c.execute("SELECT id, st, difal, icms, tributacao FROM materiais")
+    for row_id, st_v, dif_v, icm_v, trib_v in c.fetchall():
+        if not trib_v:
+            partes = []
+            if st_v and str(st_v).strip() not in ["", "-", "None"]:
+                partes.append(f"ST: {str(st_v).strip()}%")
+            if dif_v and str(dif_v).strip() not in ["", "-", "None"]:
+                partes.append(f"DIFAL: {str(dif_v).strip()}%")
+            if icm_v and str(icm_v).strip() not in ["", "-", "None"]:
+                partes.append(f"ICMS: {str(icm_v).strip()}%")
+            if partes:
+                c.execute("UPDATE materiais SET tributacao = %s WHERE id = %s", (" | ".join(partes), row_id))
     conn.commit()
 except:
     conn.rollback()
@@ -207,16 +217,12 @@ def montar_identificador(r):
     val_str = f" | R$ {r['valor_kg']}/kg" if str(r['valor_kg']) not in ["-", "", "None"] else ""
     
     extras = []
-    if str(r.get('origem', '')) not in ["", "-", "None"]:
+    if str(r.get('origem', '')).strip() not in ["", "-", "None"]:
         extras.append(f"Orig: {r['origem']}")
-    if str(r.get('st', '')) not in ["", "-", "None"]:
-        extras.append(f"ST: {r['st']}%")
-    if str(r.get('difal', '')) not in ["", "-", "None"]:
-        extras.append(f"DIFAL: {r['difal']}%")
-    if str(r.get('icms', '')) not in ["", "-", "None"]:
-        extras.append(f"ICMS: {r['icms']}%")
+    if str(r.get('tributacao', '')).strip() not in ["", "-", "None"]:
+        extras.append(f"{r['tributacao']}")
         
-    fiscal_str = " | " + " / ".join(extras) if extras else ""
+    fiscal_str = " | " + " | ".join(extras) if extras else ""
     return f"{cod_str}{r['nome']} - {r['dimensoes']} | {r['filial']} | Saldo: {int(r['saldo'])} {r['unidade']}{val_str}{fiscal_str}"
 
 # --- FUNÇÃO AUXILIAR: EXIBIÇÃO DO HISTÓRICO NAS ABAS ---
@@ -314,7 +320,7 @@ if st.session_state['perfil'] == "PCP":
         with col_valor:
             valor_kg = st.text_input("Valor / kg (R$)", help="Ex: 15,50", key="cad_valor_kg")
 
-        st.markdown("**🌐 Origem e Tributação (Opcional - Preencha apenas se aplicável)**")
+        st.markdown("**🌐 Origem e Tributação (Opcional - Apenas os campos preenchidos aparecerão no Inventário)**")
         col_orig_sel, col_orig_pct, col_st, col_difal, col_icms = st.columns([1.2, 1, 1, 1, 1])
         with col_orig_sel:
             origem_tipo = st.selectbox("Origem", ["Não informar", "Nacional", "Importado"], key="cad_orig_tipo")
@@ -1078,16 +1084,23 @@ if st.session_state['perfil'] == "PCP":
             if not valor_kg_limpo: 
                 valor_kg_limpo = "-"
                 
-            # Tratamento da Origem e Tributação (salva vazio "" se não preenchido)
+            # Monta a coluna 'Origem' apenas se houver valor selecionado
             orig_pct_limpo = re.sub(r'[^0-9,]', '', origem_pct) if origem_pct else ""
             if origem_tipo == "Não informar":
                 origem_final = ""
             else:
                 origem_final = f"{origem_tipo.upper()} ({orig_pct_limpo}%)" if orig_pct_limpo else origem_tipo.upper()
                 
+            # Monta a coluna unificada 'ST (%) | DIFAL (%) | ICMS (%)' apenas com os que tiverem valor
             st_limpo = re.sub(r'[^0-9,]', '', st_val) if st_val else ""
             difal_limpo = re.sub(r'[^0-9,]', '', difal_val) if difal_val else ""
             icms_limpo = re.sub(r'[^0-9,]', '', icms_val) if icms_val else ""
+            
+            partes_trib = []
+            if st_limpo: partes_trib.append(f"ST: {st_limpo}%")
+            if difal_limpo: partes_trib.append(f"DIFAL: {difal_limpo}%")
+            if icms_limpo: partes_trib.append(f"ICMS: {icms_limpo}%")
+            tributacao_final = " | ".join(partes_trib)
             
             if campos_vazios:
                 st.warning("⚠️ Por favor, preencha todos os campos obrigatórios da peça!")
@@ -1106,9 +1119,9 @@ if st.session_state['perfil'] == "PCP":
                     st.error(f"❌ Cadastro Bloqueado (Segurança Ativada): O material '{nome_limpo}' com essas dimensões exatas já existe na filial {filial_selecionada}!")
                 else:
                     c.execute('''
-                        INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo, filial, valor_kg, origem, st, difal, icms)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, quantidade, filial_selecionada, valor_kg_limpo, origem_final, st_limpo, difal_limpo, icms_limpo))
+                        INSERT INTO materiais (codigo, categoria, tipo, nome, dimensoes, unidade, saldo, filial, valor_kg, origem, tributacao)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (cod_final, categoria, tipo, nome_limpo, dimensoes_limpas, unidade_para_salvar, quantidade, filial_selecionada, valor_kg_limpo, origem_final, tributacao_final))
                     
                     c.execute('''
                         INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
@@ -1124,8 +1137,8 @@ if st.session_state['perfil'] == "PCP":
     with aba_movimentacao:
         st.subheader("🔄 Movimentação de Estoque")
 
-        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo, unidade, filial, valor_kg, origem, st, difal, icms FROM materiais")
-        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "codigo", "categoria", "tipo", "nome", "dimensoes", "saldo", "unidade", "filial", "valor_kg", "origem", "st", "difal", "icms"])
+        c.execute("SELECT id, codigo, categoria, tipo, nome, dimensoes, saldo, unidade, filial, valor_kg, origem, tributacao FROM materiais")
+        df_materiais = pd.DataFrame(c.fetchall(), columns=["id", "codigo", "categoria", "tipo", "nome", "dimensoes", "saldo", "unidade", "filial", "valor_kg", "origem", "tributacao"])
 
         if df_materiais.empty:
             st.info("💡 Cadastre pelo menos um material no formulário acima para poder realizar movimentações.")
@@ -1257,18 +1270,53 @@ if st.session_state['perfil'] == "PCP":
     # --- ABA DE INVENTÁRIO (PCP) ---
     with aba_inventario:
         st.subheader("📋 Planilha de Inventário Dinâmica")
-        st.info("💡 **Edição Rápida PCP:** Dê um duplo-clique nas células de **Código**, **Dimensões** (útil para atualizar os Perfis W antigos!), **Valor / kg**, **Origem**, **ST (%)**, **DIFAL (%)** ou **ICMS (%)** para editar, e depois clique no botão de Salvar abaixo.")
         
-        c.execute("SELECT id, codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg, origem, st, difal, icms FROM materiais ORDER BY nome")
-        df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg", "Origem", "ST (%)", "DIFAL (%)", "ICMS (%)"])
+        c.execute("SELECT id, codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg, origem, tributacao FROM materiais ORDER BY nome")
+        df_estoque = pd.DataFrame(c.fetchall(), columns=["id", "Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg", "Origem", "ST (%) | DIFAL (%) | ICMS (%)"])
         
         if df_estoque.empty:
             st.info("O estoque está vazio.")
         else:
             df_estoque.fillna("", inplace=True)
             
+            # --- BARRA DE FILTROS DO INVENTÁRIO (PCP) ---
+            st.markdown("##### 🔍 Filtrar Inventário")
+            col_f1, col_f2, col_f3, col_f4 = st.columns([1, 1.5, 1.8, 1.5])
+            
+            with col_f1:
+                filiais_disp = ["Todas"] + sorted([f for f in df_estoque["Aços Vital"].unique().tolist() if f])
+                f_filial = st.selectbox("Filial (Aços Vital):", filiais_disp, key="inv_pcp_filial")
+                
+            df_temp = df_estoque if f_filial == "Todas" else df_estoque[df_estoque["Aços Vital"] == f_filial]
+            
+            with col_f2:
+                cats_disp = ["Todas"] + sorted([cat for cat in df_temp["Categoria"].unique().tolist() if cat])
+                f_cat = st.selectbox("Categoria:", cats_disp, key="inv_pcp_cat")
+                
+            df_temp2 = df_temp if f_cat == "Todas" else df_temp[df_temp["Categoria"] == f_cat]
+            
+            with col_f3:
+                tipos_disp = ["Todos"] + sorted([t for t in df_temp2["Tipo"].unique().tolist() if t])
+                f_tipo = st.selectbox("Tipo:", tipos_disp, key="inv_pcp_tipo")
+                
+            with col_f4:
+                f_busca = st.text_input("Buscar Código ou Medida:", placeholder="Digite para filtrar...", key="inv_pcp_busca")
+                
+            # Aplicando os filtros selecionados
+            df_filtrado_inv = df_temp2 if f_tipo == "Todos" else df_temp2[df_temp2["Tipo"] == f_tipo]
+            if f_busca:
+                termo = f_busca.strip()
+                df_filtrado_inv = df_filtrado_inv[
+                    df_filtrado_inv["Código"].astype(str).str.contains(termo, case=False, na=False) |
+                    df_filtrado_inv["Tipo"].astype(str).str.contains(termo, case=False, na=False) |
+                    df_filtrado_inv["Dimensões"].astype(str).str.contains(termo, case=False, na=False)
+                ]
+            df_filtrado_inv = df_filtrado_inv.reset_index(drop=True)
+            
+            st.info("💡 **Edição Rápida PCP:** Dê um duplo-clique em **Código**, **Dimensões**, **Valor / kg**, **Origem** ou **ST (%) | DIFAL (%) | ICMS (%)** para editar e clique em Salvar abaixo.")
+            
             edited_df = st.data_editor(
-                df_estoque,
+                df_filtrado_inv,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
@@ -1281,10 +1329,8 @@ if st.session_state['perfil'] == "PCP":
                     "UNID": st.column_config.TextColumn("UNID", width="small"),
                     "Saldo": st.column_config.NumberColumn("Saldo", width="small"),
                     "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small"),
-                    "Origem": st.column_config.TextColumn("Origem", width="medium", help="Ex: NACIONAL, IMPORTADO (4%)"),
-                    "ST (%)": st.column_config.TextColumn("ST (%)", width="small"),
-                    "DIFAL (%)": st.column_config.TextColumn("DIFAL (%)", width="small"),
-                    "ICMS (%)": st.column_config.TextColumn("ICMS (%)", width="small")
+                    "Origem": st.column_config.TextColumn("Origem", width="medium", help="Ex: NACIONAL (12%) ou IMPORTADO (4%)"),
+                    "ST (%) | DIFAL (%) | ICMS (%)": st.column_config.TextColumn("ST (%) | DIFAL (%) | ICMS (%)", width="medium", help="Ex: ST: 18% | ICMS: 12%")
                 },
                 disabled=["Aços Vital", "Categoria", "Tipo", "UNID", "Saldo"],
                 key="editor_inventario"
@@ -1294,7 +1340,7 @@ if st.session_state['perfil'] == "PCP":
                 alteracoes = st.session_state["editor_inventario"]["edited_rows"]
                 if alteracoes:
                     for row_idx, col_alteradas in alteracoes.items():
-                        db_id = int(df_estoque.loc[row_idx, "id"])
+                        db_id = int(df_filtrado_inv.loc[row_idx, "id"])
                         
                         c.execute("SELECT categoria, tipo, nome, dimensoes, unidade FROM materiais WHERE id = %s", (db_id,))
                         mat_info = c.fetchone()
@@ -1319,20 +1365,10 @@ if st.session_state['perfil'] == "PCP":
                             nova_orig = str(nova_orig).strip().upper() if nova_orig else ""
                             c.execute("UPDATE materiais SET origem = %s WHERE id = %s", (nova_orig, db_id))
 
-                        if "ST (%)" in col_alteradas:
-                            novo_st = col_alteradas["ST (%)"]
-                            novo_st = re.sub(r'[^0-9,]', '', str(novo_st)) if novo_st else ""
-                            c.execute("UPDATE materiais SET st = %s WHERE id = %s", (novo_st, db_id))
-
-                        if "DIFAL (%)" in col_alteradas:
-                            novo_difal = col_alteradas["DIFAL (%)"]
-                            novo_difal = re.sub(r'[^0-9,]', '', str(novo_difal)) if novo_difal else ""
-                            c.execute("UPDATE materiais SET difal = %s WHERE id = %s", (novo_difal, db_id))
-
-                        if "ICMS (%)" in col_alteradas:
-                            novo_icms = col_alteradas["ICMS (%)"]
-                            novo_icms = re.sub(r'[^0-9,]', '', str(novo_icms)) if novo_icms else ""
-                            c.execute("UPDATE materiais SET icms = %s WHERE id = %s", (novo_icms, db_id))
+                        if "ST (%) | DIFAL (%) | ICMS (%)" in col_alteradas:
+                            nova_trib = col_alteradas["ST (%) | DIFAL (%) | ICMS (%)"]
+                            nova_trib = str(nova_trib).strip().upper() if nova_trib else ""
+                            c.execute("UPDATE materiais SET tributacao = %s WHERE id = %s", (nova_trib, db_id))
                             
                         c.execute('''
                             INSERT INTO historico_movimentacao (data_hora, usuario, categoria, tipo, nome, dimensoes, unidade, operacao, quantidade)
@@ -1377,19 +1413,51 @@ if st.session_state['perfil'] == "PCP":
         exibir_historico_operacoes()
 
 # ==========================================
-# SE FOR VENDEDOR / COMPRAS: Visualização de Leitura Inteligente
+# SE FOR VENDEDOR / COMPRAS: Visualização de Leitura com Filtros
 # ==========================================
 elif st.session_state['perfil'] == "VENDEDOR":
     st.subheader("📋 Inventário Atualizado em Tempo Real")
-    c.execute("SELECT codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg, origem, st, difal, icms FROM materiais ORDER BY nome")
-    df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg", "Origem", "ST (%)", "DIFAL (%)", "ICMS (%)"])
+    c.execute("SELECT codigo, filial, categoria, nome, dimensoes, unidade, saldo, valor_kg, origem, tributacao FROM materiais ORDER BY nome")
+    df_estoque = pd.DataFrame(c.fetchall(), columns=["Código", "Aços Vital", "Categoria", "Tipo", "Dimensões", "UNID", "Saldo", "Valor / kg", "Origem", "ST (%) | DIFAL (%) | ICMS (%)"])
     
     if df_estoque.empty:
         st.info("O estoque está vazio no momento.")
     else:
         df_estoque.fillna("", inplace=True)
         
-        # Oculta automaticamente as colunas fiscais na visão de vendas se nenhuma peça tiver valor preenchido nelas
+        # --- BARRA DE FILTROS DO INVENTÁRIO (VENDEDOR / COMPRAS) ---
+        st.markdown("##### 🔍 Filtrar Inventário")
+        col_f1, col_f2, col_f3, col_f4 = st.columns([1, 1.5, 1.8, 1.5])
+        
+        with col_f1:
+            filiais_disp = ["Todas"] + sorted([f for f in df_estoque["Aços Vital"].unique().tolist() if f])
+            f_filial = st.selectbox("Filial (Aços Vital):", filiais_disp, key="inv_vend_filial")
+            
+        df_temp = df_estoque if f_filial == "Todas" else df_estoque[df_estoque["Aços Vital"] == f_filial]
+        
+        with col_f2:
+            cats_disp = ["Todas"] + sorted([cat for cat in df_temp["Categoria"].unique().tolist() if cat])
+            f_cat = st.selectbox("Categoria:", cats_disp, key="inv_vend_cat")
+            
+        df_temp2 = df_temp if f_cat == "Todas" else df_temp[df_temp["Categoria"] == f_cat]
+        
+        with col_f3:
+            tipos_disp = ["Todos"] + sorted([t for t in df_temp2["Tipo"].unique().tolist() if t])
+            f_tipo = st.selectbox("Tipo:", tipos_disp, key="inv_vend_tipo")
+            
+        with col_f4:
+            f_busca = st.text_input("Buscar Código ou Medida:", placeholder="Digite para filtrar...", key="inv_vend_busca")
+            
+        df_filtrado_vend = df_temp2 if f_tipo == "Todos" else df_temp2[df_temp2["Tipo"] == f_tipo]
+        if f_busca:
+            termo = f_busca.strip()
+            df_filtrado_vend = df_filtrado_vend[
+                df_filtrado_vend["Código"].astype(str).str.contains(termo, case=False, na=False) |
+                df_filtrado_vend["Tipo"].astype(str).str.contains(termo, case=False, na=False) |
+                df_filtrado_vend["Dimensões"].astype(str).str.contains(termo, case=False, na=False)
+            ]
+        df_filtrado_vend = df_filtrado_vend.reset_index(drop=True)
+        
         config_vendedor = {
             "Código": st.column_config.TextColumn("Código", width="small"),
             "Aços Vital": st.column_config.TextColumn("Aços Vital", width="small"),
@@ -1399,14 +1467,12 @@ elif st.session_state['perfil'] == "VENDEDOR":
             "UNID": st.column_config.TextColumn("UNID", width="small"),
             "Saldo": st.column_config.NumberColumn("Saldo", width="small"),
             "Valor / kg": st.column_config.TextColumn("Valor / kg", width="small"),
-            "Origem": st.column_config.TextColumn("Origem", width="medium") if df_estoque["Origem"].str.strip().replace("-", "").any() else None,
-            "ST (%)": st.column_config.TextColumn("ST (%)", width="small") if df_estoque["ST (%)"].str.strip().replace("-", "").any() else None,
-            "DIFAL (%)": st.column_config.TextColumn("DIFAL (%)", width="small") if df_estoque["DIFAL (%)"].str.strip().replace("-", "").any() else None,
-            "ICMS (%)": st.column_config.TextColumn("ICMS (%)", width="small") if df_estoque["ICMS (%)"].str.strip().replace("-", "").any() else None,
+            "Origem": st.column_config.TextColumn("Origem", width="medium"),
+            "ST (%) | DIFAL (%) | ICMS (%)": st.column_config.TextColumn("ST (%) | DIFAL (%) | ICMS (%)", width="medium"),
         }
         
         st.dataframe(
-            df_estoque, 
+            df_filtrado_vend, 
             use_container_width=True, 
             hide_index=True,
             column_config=config_vendedor
