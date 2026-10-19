@@ -176,35 +176,19 @@ c.execute('''
 ''')
 conn.commit()
 
-# Migração automática de colunas fiscais e unificação inteligente de ST | DIFAL | ICMS
+# Migração automática blindada das novas colunas
 try:
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS codigo TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS filial TEXT;")
     c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS valor_kg TEXT;")
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS origem TEXT;")
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS st TEXT;")
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS difal TEXT;")
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS icms TEXT;")
-    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS tributacao TEXT;")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT '';")
+    c.execute("ALTER TABLE materiais ADD COLUMN IF NOT EXISTS tributacao TEXT DEFAULT '';")
+    conn.commit() # Salva imediatamente a criação das colunas no Supabase!
     
-    c.execute("UPDATE materiais SET origem = '' WHERE origem IS NULL OR origem = '-'")
-    c.execute("UPDATE materiais SET tributacao = '' WHERE tributacao IS NULL OR tributacao = '-'")
-    
-    # Se havia algum dado salvo nas colunas separadas st/difal/icms, junta tudo em 'tributacao'
-    c.execute("SELECT id, st, difal, icms, tributacao FROM materiais")
-    for row_id, st_v, dif_v, icm_v, trib_v in c.fetchall():
-        if not trib_v:
-            partes = []
-            if st_v and str(st_v).strip() not in ["", "-", "None"]:
-                partes.append(f"ST: {str(st_v).strip()}%")
-            if dif_v and str(dif_v).strip() not in ["", "-", "None"]:
-                partes.append(f"DIFAL: {str(dif_v).strip()}%")
-            if icm_v and str(icm_v).strip() not in ["", "-", "None"]:
-                partes.append(f"ICMS: {str(icm_v).strip()}%")
-            if partes:
-                c.execute("UPDATE materiais SET tributacao = %s WHERE id = %s", (" | ".join(partes), row_id))
+    c.execute("UPDATE materiais SET origem = '' WHERE origem IS NULL OR origem = '-';")
+    c.execute("UPDATE materiais SET tributacao = '' WHERE tributacao IS NULL OR tributacao = '-';")
     conn.commit()
-except:
+except Exception as e:
     conn.rollback()
 
 # --- FUNÇÃO AUXILIAR: FUSO HORÁRIO DE BRASÍLIA ---
