@@ -62,8 +62,8 @@ if not st.session_state['logged_in']:
         usuarios_pcp = {
             "denis.pcp": "Davi&Heitor",
             "joao.pcp": "46993061",
-            "jonathan.pcp": "120910" ,
-            "rafael.stock": "recruta" ,
+            "jonathan.pcp": "120910",
+            "rafael.stock": "recruta",
             "douglas.mogi": "drowssap",
             "entrada.mogi": "adartnedrowssap",
             "saida.mogi": "adiasdrowssap"
@@ -221,8 +221,8 @@ if st.session_state['perfil'] == "PCP":
             "CONEXÕES": ["Curva", "Cruz (ASME B16.9 ou Inox MSS SP-43)", "Redução (ASME B16.9 ou Inox MSS SP-43)", "Pestana (ASME B16.9 ou Inox MSS SP-43)", "Niple de Redução (ASME B16.9 ou MSSP-95)", "Alta Pressão / Forjadas", "Colares", "Plugs / Buchas / Niples"],
             "TUBOS": ["Aço Inox", "Com Costura", "Aço Carbono", "Mecânicos Laminados", "Calandrados de Grandes Diâmetros", "Industriais"],
             "LINHA PEAD": ["Flange Solto PEAD", "Conexões de Eletrofusão", "Conexões Injetadas", "Colarinhos Usinados", "Curvas", "Tees Segmentadas", "Redução Usinada"],
-            "PERFIS LAMINADOS E DOBRADOS": ["(W) I", "(W) H - HP", "I - Abas Inclinadas", "U - Abas Inclinadas", "U - Simples", "U - Enrijecido", "Cantoneira - Abas Iguais", "Cantoneira - Abas Desiguais", "Barra Redonda", "Barra Quadrada", "Barra Sextavada", "Barra Chata"],
-            "CHAPAS E GRADES": ["Fina Frio", "Fina Quente", "Grossa", "Xadrez", "Zincada", "Perfurada - Furo Redondo", "Expandida", "Piso Soldadas", "Piso Entrelaçadas", "Degraus para Escadas"],
+            "PERFIS LAMINADOS E DOBRADOS": ["(W) I", "(W) H - HP", "I - Abas Inclinadas", "U - Abas Inclinadas", "U - Simples", "U - Enrijecido", "Cantoneira", "Barra Redonda", "Barra Quadrada", "Barra Sextavada", "Barra Chata"],
+            "CHAPAS E GRADES": ["Fina Frio", "Fina Quente", "Inox", "Grossa", "Xadrez", "Zincada", "Perfurada - Furo Redondo", "Expandida", "Piso Soldadas", "Piso Entrelaçadas", "Degraus para Escadas"],
             "CONSTRUÇÃO CIVIL": ["Vergalhões CA - 25", "Vergalhões CA - 50", "Vergalhões CA - 60", "Arame Recozido", "Barra de Transferência", "Tela Soldada Nervurada", "Telha", "Treliça"]
         }
 
@@ -238,7 +238,11 @@ if st.session_state['perfil'] == "PCP":
         # VACINA 3: Espelho do Catálogo
         # Mostra tudo que já existe para o operador não duplicar
         # ==========================================
-        c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND tipo = %s ORDER BY nome, dimensoes", (categoria, tipo))
+        if tipo == "Cantoneira":
+            c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND tipo LIKE 'Cantoneira%%' ORDER BY nome, dimensoes", (categoria,))
+        else:
+            c.execute("SELECT codigo, nome, dimensoes, filial FROM materiais WHERE categoria = %s AND tipo = %s ORDER BY nome, dimensoes", (categoria, tipo))
+            
         catalogo_existente = c.fetchall()
         if catalogo_existente:
             with st.expander(f"👀 Ver peças do tipo '{tipo}' já cadastradas (Evite duplicidade!)", expanded=True):
@@ -431,7 +435,7 @@ if st.session_state['perfil'] == "PCP":
 
         elif categoria == "TUBOS":
             modelos_tubos = {
-                "Aço Inox": ["5-S", "10-S", "40-S", "80-S", "160-S"],
+                "Aço Inox": ["5-S", "10-S", "20-S", "40-S", "80-S", "160-S"],
                 "Com Costura": ["Leve", "Média", "Pesada"],
                 "Aço Carbono": ["Nenhum","SCH 10", "SCH 20", "SCH 30", "SCH 40", "SCH 60", "SCH 80", "SCH 100", "SCH 120", "SCH 140", "SCH 160"],
                 "Mecânicos Laminados": ["Com Centragem Externa", "Com Centragem Interna"],
@@ -658,40 +662,50 @@ if st.session_state['perfil'] == "PCP":
                 unidade_para_salvar = tamanho
                 if not bit_h or not bit_b or not aba or not esp: campos_vazios = True
 
-            elif tipo == "Cantoneira - Abas Iguais":
-                col3, col4, col5 = st.columns(3)
-                with col3:
-                    bitola = st.text_input("Bitola (Pol)", key="cad_bit_cai")
-                with col4:
-                    esp = st.text_input("Espessura (Pol)", key="cad_esp_cai")
-                with col5:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_cai")
-                    
-                nome = "Cantoneira Abas Iguais"
-                dim1 = bitola.replace('"', '').strip()
-                dim2 = esp.replace('"', '').strip()
-                dimensoes_para_salvar = f'Bitola: {dim1}" | Esp: {dim2}"'
-                unidade_para_salvar = tamanho
-                if not bitola or not esp: campos_vazios = True
+            # Unificação inteligente de Cantoneira (Abas Iguais / Desiguais + Opção Inox)
+            elif tipo in ["Cantoneira", "Cantoneira - Abas Iguais", "Cantoneira - Abas Desiguais"]:
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    indice_padrao = 1 if tipo == "Cantoneira - Abas Desiguais" else 0
+                    subtipo_cant = st.selectbox("Modelo da Cantoneira", ["Abas Iguais", "Abas Desiguais"], index=indice_padrao, key="cad_sub_cant")
+                with col_c2:
+                    mat_cant = st.selectbox("Material", ["Aço Carbono (Padrão)", "Inox"], key="cad_mat_cant")
 
-            elif tipo == "Cantoneira - Abas Desiguais":
-                col3, col4, col5, col6 = st.columns(4)
-                with col3:
-                    bit_h = st.text_input("Bitola h (Pol)", key="cad_h_cad")
-                with col4:
-                    bit_b = st.text_input("Bitola b (Pol)", key="cad_b_cad")
-                with col5:
-                    esp = st.text_input("Espessura (Pol)", key="cad_esp_cad")
-                with col6:
-                    tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_cad")
-                    
-                nome = "Cantoneira Abas Desiguais"
-                dim_h = bit_h.replace('"', '').strip()
-                dim_b = bit_b.replace('"', '').strip()
-                dim_esp = esp.replace('"', '').strip()
-                dimensoes_para_salvar = f'h: {dim_h}" x b: {dim_b}" | Esp: {dim_esp}"'
-                unidade_para_salvar = tamanho
-                if not bit_h or not bit_b or not esp: campos_vazios = True
+                sufixo_inox = " Inox" if mat_cant == "Inox" else ""
+
+                if subtipo_cant == "Abas Iguais":
+                    col3, col4, col5 = st.columns(3)
+                    with col3:
+                        bitola = st.text_input("Bitola (Pol)", key="cad_bit_cai")
+                    with col4:
+                        esp = st.text_input("Espessura (Pol)", key="cad_esp_cai")
+                    with col5:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_cai")
+                        
+                    nome = f"Cantoneira Abas Iguais{sufixo_inox}"
+                    dim1 = bitola.replace('"', '').strip()
+                    dim2 = esp.replace('"', '').strip()
+                    dimensoes_para_salvar = f'Bitola: {dim1}" | Esp: {dim2}"'
+                    unidade_para_salvar = tamanho
+                    if not bitola or not esp: campos_vazios = True
+                else:
+                    col3, col4, col5, col6 = st.columns(4)
+                    with col3:
+                        bit_h = st.text_input("Bitola h (Pol)", key="cad_h_cad")
+                    with col4:
+                        bit_b = st.text_input("Bitola b (Pol)", key="cad_b_cad")
+                    with col5:
+                        esp = st.text_input("Espessura (Pol)", key="cad_esp_cad")
+                    with col6:
+                        tamanho = st.selectbox("Tamanho", tamanho_opcoes, key="cad_tam_cad")
+                        
+                    nome = f"Cantoneira Abas Desiguais{sufixo_inox}"
+                    dim_h = bit_h.replace('"', '').strip()
+                    dim_b = bit_b.replace('"', '').strip()
+                    dim_esp = esp.replace('"', '').strip()
+                    dimensoes_para_salvar = f'h: {dim_h}" x b: {dim_b}" | Esp: {dim_esp}"'
+                    unidade_para_salvar = tamanho
+                    if not bit_h or not bit_b or not esp: campos_vazios = True
 
             elif tipo in ["Barra Redonda", "Barra Quadrada", "Barra Sextavada"]:
                 col3, col4 = st.columns(2)
@@ -725,16 +739,17 @@ if st.session_state['perfil'] == "PCP":
         elif categoria == "CHAPAS E GRADES":
             nome = f"Chapa {tipo}" if "Piso" not in tipo and "Degraus" not in tipo else f"Grade {tipo}"
             
-            if tipo in ["Fina Frio", "Fina Quente"]:
+            # Inclusão de "Inox" no Padrão A e mudança de Comprimento/Largura para (mm)
+            if tipo in ["Fina Frio", "Fina Quente", "Inox"]:
                 col3, col4, col5 = st.columns(3)
                 with col3:
                     bitola = st.text_input("Bitola (mm)", key=f"cad_bit_{tipo[:4]}")
                 with col4:
-                    comp = st.text_input("Comprimento (m)", key=f"cad_comp_{tipo[:4]}")
+                    comp = st.text_input("Comprimento (mm)", key=f"cad_comp_{tipo[:4]}")
                 with col5:
-                    larg = st.text_input("Largura (m)", key=f"cad_larg_{tipo[:4]}")
+                    larg = st.text_input("Largura (mm)", key=f"cad_larg_{tipo[:4]}")
                     
-                dimensoes_para_salvar = f"Bitola: {bitola}mm | {comp}m x {larg}m"
+                dimensoes_para_salvar = f"Bitola: {bitola}mm | {comp}mm x {larg}mm"
                 if not bitola or not comp or not larg: campos_vazios = True
 
             elif tipo in ["Grossa", "Xadrez", "Zincada"]:
@@ -742,12 +757,12 @@ if st.session_state['perfil'] == "PCP":
                 with col3:
                     esp = st.text_input("Espessura (Pol)", key=f"cad_esp_{tipo[:4]}")
                 with col4:
-                    comp = st.text_input("Comprimento (m)", key=f"cad_comp_{tipo[:4]}")
+                    comp = st.text_input("Comprimento (mm)", key=f"cad_comp_{tipo[:4]}")
                 with col5:
-                    larg = st.text_input("Largura (m)", key=f"cad_larg_{tipo[:4]}")
+                    larg = st.text_input("Largura (mm)", key=f"cad_larg_{tipo[:4]}")
                     
                 dim1 = esp.replace('"', '').strip()
-                dimensoes_para_salvar = f'Esp: {dim1}" | {comp}m x {larg}m'
+                dimensoes_para_salvar = f'Esp: {dim1}" | {comp}mm x {larg}mm'
                 if not esp or not comp or not larg: campos_vazios = True
 
             elif tipo == "Perfurada - Furo Redondo":
@@ -755,9 +770,9 @@ if st.session_state['perfil'] == "PCP":
                 with col3:
                     esp = st.text_input("Espessura (Pol)", key="cad_esp_perf")
                 with col4:
-                    comp = st.text_input("Comprimento (m)", key="cad_comp_perf")
+                    comp = st.text_input("Comprimento (mm)", key="cad_comp_perf")
                 with col5:
-                    larg = st.text_input("Largura (m)", key="cad_larg_perf")
+                    larg = st.text_input("Largura (mm)", key="cad_larg_perf")
                     
                 col6, col7 = st.columns(2)
                 with col6:
@@ -767,7 +782,7 @@ if st.session_state['perfil'] == "PCP":
                     
                 dim1 = esp.replace('"', '').strip()
                 dim2 = furo.replace('"', '').strip()
-                dimensoes_para_salvar = f'Esp: {dim1}" | {comp}m x {larg}m | Furo: {dim2}" | E.C: {ec}mm'
+                dimensoes_para_salvar = f'Esp: {dim1}" | {comp}mm x {larg}mm | Furo: {dim2}" | E.C: {ec}mm'
                 if not esp or not comp or not larg or not furo or not ec: campos_vazios = True
 
             elif tipo == "Expandida":
@@ -938,9 +953,9 @@ if st.session_state['perfil'] == "PCP":
                 
                 c.execute('''
                     SELECT id FROM materiais 
-                    WHERE categoria = %s AND tipo = %s AND nome = %s 
+                    WHERE categoria = %s AND nome = %s 
                     AND REPLACE(dimensoes, ' ', '') = %s AND filial = %s
-                ''', (categoria, tipo, nome_limpo, dimensoes_sem_espaco, filial_selecionada))
+                ''', (categoria, nome_limpo, dimensoes_sem_espaco, filial_selecionada))
                 
                 if c.fetchone():
                     st.error(f"❌ Cadastro Bloqueado (Segurança Ativada): O material '{nome_limpo}' com essas dimensões exatas já existe na filial {filial_selecionada} (mesmo se você digitou os espaços de outro jeito)!")
