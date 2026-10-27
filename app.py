@@ -63,7 +63,7 @@ if not st.session_state['logged_in']:
             "denis.pcp": "Davi&Heitor",
             "joao.pcp": "46993061",
             "jonathan.pcp": "120910",
-            "rafael.stock": "recruta",
+            "Pedro.stock": "014775",
             "douglas.mogi": "drowssap",
             "entrada.mogi": "adartnedrowssap",
             "saida.mogi": "adiasdrowssap"
@@ -79,7 +79,7 @@ if not st.session_state['logged_in']:
             "denis.pcp": "Denis",
             "joao.pcp": "João V.",
             "jonathan.pcp": "Jonathan",
-            "rafael.stock": "Rafael S.",
+            "Pedro.stock": "Pedro (URA)",
             "douglas.mogi": "Douglas (MOGI)",
             "entrada.mogi": "Entrada (MOGI)",
             "saida.mogi": "Saida (MOGI)",
